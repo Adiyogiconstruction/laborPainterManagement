@@ -1,0 +1,14 @@
+.loading-page {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  color: var(--teal);
+  text-align: center;
+  font-size: 12px;
+}
+.mobile-menu,
+.mobile-close,
+.sidebar-scrim {
+  display: none;
+}
