@@ -27,7 +27,7 @@
 }
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
   background: var(--paper);
 }
 button,
@@ -59,4 +59,36 @@ input:focus,
 select:focus {
   border-color: var(--teal);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+@media print {
+  .attendance-print-root > :not(.attendance-report-panel) {
+    display: none !important;
+  }
+
+  .attendance-print-root .attendance-report-panel {
+    display: block !important;
+    margin: 0;
+  }
+
+  .attendance-print-root .attendance-print-action {
+    display: none !important;
+  }
+
+  .attendance-print-root .attendance-report-panel .panel-header {
+    display: block;
+  }
+
+  .attendance-print-root .attendance-report-panel .panel-header > :last-child {
+    display: none;
+  }
+
+  .attendance-print-root .attendance-report-panel .table-wrap {
+    overflow: visible;
+  }
+
+  .attendance-print-root .attendance-report-panel table {
+    min-width: 0;
+    width: 100%;
+  }
 }

@@ -103,7 +103,11 @@ function AdminForm({ onClose, onSaved }) {
         </Field>
         <div className={`${styles["modal-actions"]}`}>
           <ErrorNote error={error} />
-          <Button type="button" className={`${styles["button-ghost"]}`} onClick={onClose}>
+          <Button
+            type="button"
+            className={`${styles["button-ghost"]}`}
+            onClick={onClose}
+          >
             Cancel
           </Button>
           <Button className={`${styles["button-primary"]}`} loading={saving}>
@@ -115,9 +119,61 @@ function AdminForm({ onClose, onSaved }) {
   );
 }
 
+function ResetPasswordForm({ user, onClose, onSaved }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await request(
+        api.patch(`/auth/admins/${user.id}/password`, { password }),
+      );
+      onSaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title={`Reset password for ${user.name}`} onClose={onClose}>
+      <form className={`${styles["form-grid"]}`} onSubmit={save}>
+        <Field label="New temporary password">
+          <input
+            required
+            autoFocus
+            minLength="8"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Minimum 8 characters"
+          />
+        </Field>
+        <div className={`${styles["modal-actions"]}`}>
+          <ErrorNote error={error} />
+          <Button
+            type="button"
+            className={`${styles["button-ghost"]}`}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button className={`${styles["button-primary"]}`} loading={saving}>
+            Reset password
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function AdminsPage() {
   const [users, setUsers] = useState([]);
   const [adding, setAdding] = useState(false);
+  const [resetting, setResetting] = useState(null);
   const [error, setError] = useState("");
   const load = () =>
     request(api.get("/auth/admins"))
@@ -145,7 +201,10 @@ export function AdminsPage() {
         title="Admin access"
         detail="Only authorised people can view or manage business records."
         action={
-          <AddButton className={`${styles["button-primary"]}`} onClick={() => setAdding(true)}>
+          <AddButton
+            className={`${styles["button-primary"]}`}
+            onClick={() => setAdding(true)}
+          >
             Add administrator
           </AddButton>
         }
@@ -186,12 +245,20 @@ export function AdminsPage() {
                   </td>
                   <td>
                     {user.role !== "OWNER" && (
-                      <button
-                        className={`${styles["text-button"]}`}
-                        onClick={() => changeActive(user)}
-                      >
-                        {user.active ? "Disable" : "Enable"}
-                      </button>
+                      <div className={`${styles["actions-inline"]}`}>
+                        <button
+                          className={`${styles["text-button"]}`}
+                          onClick={() => setResetting(user)}
+                        >
+                          Reset password
+                        </button>
+                        <button
+                          className={`${styles["text-button"]}`}
+                          onClick={() => changeActive(user)}
+                        >
+                          {user.active ? "Disable" : "Enable"}
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -229,6 +296,13 @@ export function AdminsPage() {
             setAdding(false);
             setUsers((current) => [user, ...current]);
           }}
+        />
+      )}
+      {resetting && (
+        <ResetPasswordForm
+          user={resetting}
+          onClose={() => setResetting(null)}
+          onSaved={() => setResetting(null)}
         />
       )}
     </>

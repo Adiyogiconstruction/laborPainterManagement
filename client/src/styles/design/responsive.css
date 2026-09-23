@@ -34,6 +34,15 @@
   }
 }
 @media (max-width: 760px) {
+  body {
+    overflow-x: hidden;
+  }
+  .app-shell,
+  .app-main,
+  .page-wrap {
+    width: 100%;
+    max-width: 100%;
+  }
   .sidebar {
     transform: translateX(-100%);
     transition: transform 0.2s ease;
@@ -82,8 +91,12 @@
   }
   .page-header {
     margin-bottom: 19px;
-    gap: 12px;
-    align-items: flex-end;
+    gap: 14px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .page-header > div:first-child {
+    min-width: 0;
   }
   .page-header h1 {
     font-size: 23px;
@@ -94,6 +107,14 @@
   .page-header .button {
     font-size: 11px;
     padding: 9px 10px;
+    width: 100%;
+  }
+  .dashboard-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .dashboard-header-actions .button {
+    flex: 1 1 150px;
   }
   .metric-grid {
     gap: 10px;
@@ -131,10 +152,20 @@
   }
   .panel-header {
     margin-bottom: 11px;
+    flex-wrap: wrap;
+  }
+  .panel-header > :first-child {
+    min-width: 0;
+  }
+  .panel-header > .button,
+  .panel-header > .button-secondary,
+  .panel-header > .button-primary {
+    width: 100%;
   }
   .toolbar {
     align-items: stretch;
     margin-bottom: 11px;
+    gap: 8px;
   }
   .toolbar > .section-tabs {
     margin-right: 0;
@@ -149,10 +180,31 @@
   .toolbar > select,
   .search {
     width: 100%;
+    min-width: 0;
+  }
+  .filter-bar > * {
+    flex: 1 1 100%;
+  }
+  .filter-bar .button,
+  .filter-bar .button-secondary,
+  .filter-bar .button-primary {
+    width: 100%;
+  }
+  .table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table {
+    min-width: 620px;
   }
   .form-grid,
   .form-grid.three-col {
     grid-template-columns: 1fr;
+  }
+  .site-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .site-row input:first-child {
+    grid-column: 1 / -1;
   }
   .modal-backdrop {
     padding: 0;
@@ -172,9 +224,25 @@
     bottom: -18px;
     background: #fff;
     padding-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .modal-actions .form-error {
+    width: 100%;
+    margin-right: 0;
+  }
+  .modal-actions .button {
+    flex: 1 1 140px;
   }
   .money-list {
     grid-template-columns: 1fr 1fr;
+  }
+  .site-editor-head {
+    align-items: flex-start;
+  }
+  .site-editor-head .button,
+  .site-editor-head .button-ghost,
+  .site-editor-head .button-secondary {
+    flex: 0 0 auto;
   }
   .login-screen {
     grid-template-columns: 1fr;
@@ -192,6 +260,76 @@
     height: 108px;
     object-fit: contain;
     margin-bottom: 35px;
+  }
+}
+@media (max-width: 480px) {
+  .page-wrap {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .topbar {
+    padding: 0 12px;
+  }
+  .secure-note {
+    font-size: 0;
+    gap: 0;
+  }
+  .secure-note svg {
+    width: 17px;
+    height: 17px;
+  }
+  .metric-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .metric {
+    min-height: 102px;
+    padding: 11px;
+  }
+  .metric-top span {
+    max-width: 90px;
+    line-height: 1.25;
+  }
+  .metric strong {
+    font-size: 17px;
+  }
+  .quick-actions button {
+    min-height: 58px;
+    padding: 12px;
+  }
+  .panel {
+    padding: 12px;
+  }
+  .section-tabs {
+    display: flex;
+  }
+  .section-tabs button {
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    white-space: normal;
+  }
+  .form-grid {
+    gap: 11px;
+  }
+  .money-list,
+  .aadhaar-documents {
+    grid-template-columns: 1fr;
+  }
+  .modal,
+  .modal-wide {
+    padding: 16px;
+  }
+  .modal-actions {
+    bottom: -16px;
+    padding-bottom: 16px;
+  }
+  .modal-actions .button {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .login-card {
+    padding: 36px 20px;
   }
 }
 @media print {

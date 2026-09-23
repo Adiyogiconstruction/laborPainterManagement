@@ -57,6 +57,21 @@
 .table-wrap tbody tr:hover {
   background: #fbfdfc;
 }
+.table-wrap tbody tr.worker-active {
+  background: #f2fbf8;
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+.table-wrap tbody tr.worker-active:hover {
+  background: #eaf7f3;
+}
+.table-wrap tbody tr.worker-inactive {
+  background: #fafafa;
+  color: var(--muted);
+  box-shadow: inset 3px 0 0 #cbd6d3;
+}
+.table-wrap tbody tr.worker-inactive strong {
+  color: var(--muted);
+}
 .table-wrap td strong {
   font-size: 12px;
   display: block;
@@ -205,6 +220,49 @@
   font-size: 11px;
   font-weight: 800;
   padding: 3px;
+}
+.site-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #dce9e6;
+  border-radius: 10px;
+  background: #f8fbfa;
+}
+.site-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.site-editor-head > div {
+  display: grid;
+  gap: 3px;
+}
+.site-editor-head strong {
+  color: #506561;
+  font-size: 11px;
+}
+.site-editor-head small {
+  color: #849490;
+  font-size: 9px;
+}
+.site-rows {
+  display: grid;
+  gap: 8px;
+}
+.site-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.site-row input {
+  min-width: 0;
+}
+.site-row .icon-button {
+  color: #a65a51;
 }
 .compact-list {
   display: grid;
@@ -401,6 +459,11 @@
   letter-spacing: -0.4px;
   margin: 0;
 }
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .modal-head .icon-button {
   color: #526763;
 }
@@ -428,6 +491,41 @@
 .field select {
   font-size: 12px;
   font-weight: 500;
+}
+.worker-picker {
+  position: relative;
+}
+.worker-picker-results {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid #cbded9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(10, 32, 29, 0.14);
+}
+.worker-picker-results button,
+.worker-picker-results span {
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font-size: 11px;
+}
+.worker-picker-results button:hover {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.worker-picker-results span {
+  color: var(--muted);
 }
 .modal-actions {
   grid-column: 1/-1;
@@ -483,6 +581,36 @@
   color: var(--muted);
   font-size: 12px;
 }
+.aadhaar-documents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.aadhaar-document {
+  margin: 0;
+}
+.aadhaar-document-image,
+.aadhaar-document-missing {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.6;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.aadhaar-document-missing {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.aadhaar-document figcaption {
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
 .payment-extra {
   color: #138a55 !important;
   font-weight: 800;
@@ -498,4 +626,72 @@
   line-height: 1.5;
   color: var(--muted);
   margin: 5px 0 0;
+}
+.monthly-grid-wrap {
+  overflow-x: auto;
+}
+.monthly-grid {
+  min-width: 980px;
+}
+.monthly-grid th,
+.monthly-grid td {
+  min-width: 34px;
+  padding: 7px 4px;
+  text-align: center;
+}
+.monthly-grid th:first-child,
+.monthly-grid td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 170px;
+  background: var(--white);
+  text-align: left;
+}
+.monthly-grid td:first-child small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.monthly-cell {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+.monthly-cell:disabled {
+  cursor: not-allowed;
+}
+.monthly-present {
+  border-color: #9ed7c0;
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.monthly-double_present {
+  border-color: #c6b9f1;
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+.monthly-absent {
+  border-color: #efb7af;
+  background: var(--coral-soft);
+  color: var(--coral);
+}
+.monthly-half_day {
+  border-color: #efd18e;
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.monthly-leave {
+  border-color: #b8d1e8;
+  background: var(--blue-soft);
+  color: var(--blue);
 }

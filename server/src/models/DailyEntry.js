@@ -33,8 +33,6 @@ const dailyEntrySchema = new mongoose.Schema(
       enum: ["WORKING", "TRAVELLING", "NO_WORK"],
       default: "WORKING",
     },
-    paintPurchased: { type: Number, min: 0, default: 0 },
-    paintUsed: { type: Number, min: 0, default: 0 },
     expenseAmount: { type: Number, min: 0, default: 0 },
     expenseCategory: { type: String, trim: true, maxlength: 80 },
     notes: { type: String, trim: true, maxlength: 1000 },

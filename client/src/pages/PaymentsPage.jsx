@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Landmark, Trash2 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
 import { date, inputDate, money } from "../utils/formatters.js";
@@ -16,16 +16,17 @@ import {
 } from "../components/ui/index.jsx";
 import { ErrorNote, Metric, errorMessage, typeTitle } from "./shared.jsx";
 
-function PaymentForm({ onClose, onSaved }) {
+function PaymentForm({ businessType, onClose, onSaved }) {
   const [workers, setWorkers] = useState([]);
-  const [assignments, setAssignments] = useState([]);
+  const [workerSearch, setWorkerSearch] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showWorkerResults, setShowWorkerResults] = useState(false);
   const [form, setForm] = useState({
     flow: "OUTFLOW",
     kind: "ADVANCE",
     amount: "",
     paidOn: inputDate(),
     worker: "",
-    assignment: "",
     method: "CASH",
     reference: "",
     notes: "",
@@ -33,38 +34,55 @@ function PaymentForm({ onClose, onSaved }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    Promise.all([
-      request(api.get("/workers", { params: { active: true } })),
-      request(api.get("/assignments", { params: { status: "ACTIVE" } })),
-    ])
-      .then(([workerData, assignmentData]) => {
-        setWorkers(workerData.workers);
-        setAssignments(assignmentData.assignments);
-      })
+    request(
+      api.get("/workers", { params: { type: businessType, active: true } }),
+    )
+      .then(({ workers: result }) => setWorkers(result || []))
       .catch((err) => setError(errorMessage(err)));
-  }, []);
+  }, [businessType]);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(workerSearch), 250);
+    return () => clearTimeout(timer);
+  }, [workerSearch]);
   const change = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
-  const useAssignment = (id) => {
-    const assignment = assignments.find((item) => item._id === id);
-    setForm({
-      ...form,
-      assignment: id,
-      worker: assignment?.worker?._id || form.worker,
+  const filteredWorkers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return [...workers].sort((left, right) => {
+      if (!query) return left.name.localeCompare(right.name);
+      const leftName = left.name.toLowerCase();
+      const rightName = right.name.toLowerCase();
+      const leftRank = leftName.startsWith(query)
+        ? 0
+        : leftName.includes(query)
+          ? 1
+          : 2;
+      const rightRank = rightName.startsWith(query)
+        ? 0
+        : rightName.includes(query)
+          ? 1
+          : 2;
+      return leftRank - rightRank || leftName.localeCompare(rightName);
     });
+  }, [workers, searchQuery]);
+  const selectWorker = (worker) => {
+    setForm({ ...form, worker: worker._id });
+    setWorkerSearch(worker.name);
+    setShowWorkerResults(false);
   };
-  const selectedWorker = workers.find((worker) => worker._id === form.worker);
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
+      if (!form.worker) {
+        throw new Error("Please select a worker from the search results.");
+      }
       const { payment } = await request(
         api.post("/payments", {
           ...form,
           amount: Number(form.amount),
           worker: form.worker || undefined,
-          assignment: form.assignment || undefined,
         }),
       );
       onSaved(payment);
@@ -90,26 +108,6 @@ function PaymentForm({ onClose, onSaved }) {
             <option value="TRAVEL_ADVANCE">advance for ticket</option>
             <option value="OTHER">other ( need to specify)</option>
           </select>
-        </Field>
-        <Field label="Worker">
-          <select
-            required={form.kind !== "EXPENSE"}
-            value={form.worker}
-            onChange={change("worker")}
-          >
-            <option value="">
-              {form.kind === "EXPENSE" ? "Optional worker" : "Select worker"}
-            </option>
-            {workers.map((worker) => (
-              <option key={worker._id} value={worker._id}>
-                {worker.name} · {typeTitle(worker.type)} · Due{" "}
-                {money(worker.totalDue)}
-              </option>
-            ))}
-          </select>
-          {selectedWorker && (
-            <small>Current due: {money(selectedWorker.totalDue)}</small>
-          )}
         </Field>
         <Field label="Amount">
           <input
@@ -141,19 +139,44 @@ function PaymentForm({ onClose, onSaved }) {
             <option value="OTHER">Other</option>
           </select>
         </Field>
-        <Field label="Work record">
-          <select
-            value={form.assignment}
-            onChange={(event) => useAssignment(event.target.value)}
-          >
-            <option value="">No linked work</option>
-            {assignments.map((assignment) => (
-              <option key={assignment._id} value={assignment._id}>
-                {assignment.siteName} ·{" "}
-                {assignment.worker?.name || "Unassigned"}
-              </option>
-            ))}
-          </select>
+        <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
+          <div className={`${styles["worker-picker"]}`}>
+            <input
+              required
+              value={workerSearch}
+              onFocus={() => setShowWorkerResults(true)}
+              onChange={(event) => {
+                setWorkerSearch(event.target.value);
+                setForm({ ...form, worker: "" });
+                setShowWorkerResults(true);
+              }}
+              placeholder="Type worker name"
+              role="combobox"
+              aria-expanded={showWorkerResults}
+              aria-controls="payment-worker-results"
+            />
+            {showWorkerResults && workerSearch.trim() && (
+              <div
+                className={`${styles["worker-picker-results"]}`}
+                id="payment-worker-results"
+              >
+                {filteredWorkers.length ? (
+                  filteredWorkers.slice(0, 8).map((worker) => (
+                    <button
+                      type="button"
+                      key={worker._id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectWorker(worker)}
+                    >
+                      {worker.name}
+                    </button>
+                  ))
+                ) : (
+                  <span>No worker found</span>
+                )}
+              </div>
+            )}
+          </div>
         </Field>
         <Field label="Reference">
           <input
@@ -199,28 +222,57 @@ function PaymentForm({ onClose, onSaved }) {
   );
 }
 
-export function PaymentsPage() {
+export function PaymentsPage({ businessType = "LABOUR" }) {
   const [payments, setPayments] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [selectedWorker, setSelectedWorker] = useState("");
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState();
   const [error, setError] = useState("");
   const load = () =>
-    request(api.get("/payments", { params: { flow: "OUTFLOW" } }))
+    request(
+      api.get("/payments", {
+        params: {
+          flow: "OUTFLOW",
+          type: businessType,
+          ...(selectedWorker ? { worker: selectedWorker } : {}),
+        },
+      }),
+    )
       .then(({ payments: result }) => setPayments(result))
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
     load();
-  }, []);
+  }, [businessType, selectedWorker]);
+  useEffect(() => {
+    if (businessType !== "PAINTER") return;
+    request(api.get("/workers", { params: { type: businessType } }))
+      .then(({ workers: result }) => setWorkers(result))
+      .catch(() => setWorkers([]));
+  }, [businessType]);
   const totalPaid = payments.reduce(
     (total, item) => total + Number(item.amount || 0),
     0,
   );
+  const filteredWorkerName =
+    workers.find((worker) => worker._id === selectedWorker)?.name ||
+    "Selected painter";
   return (
     <>
       <PageHeader
-        eyebrow="WORKFORCE PAYMENTS"
-        title="Labour & painter payouts"
-        detail="Track exactly how much was paid to each labour worker and painter."
+        eyebrow={
+          businessType === "PAINTER" ? "PAINTER PAYMENTS" : "LABOUR PAYMENTS"
+        }
+        title={
+          businessType === "PAINTER"
+            ? "Painter payment ledger"
+            : "Labour payment ledger"
+        }
+        detail={
+          businessType === "PAINTER"
+            ? "Track painter cash advances, expenses and payout records separately from labour."
+            : "Track labour wages, advances and payout records separately from painter work."
+        }
         action={
           <AddButton
             className={`${styles["button-primary"]}`}
@@ -230,18 +282,54 @@ export function PaymentsPage() {
           </AddButton>
         }
       />
+      {businessType === "PAINTER" && (
+        <Panel
+          title="Painter ledger filter"
+          detail="Select a painter to inspect that person’s cash ledger and payouts."
+        >
+          <div className={`${styles["toolbar"]}`}>
+            <select
+              value={selectedWorker}
+              onChange={(event) => setSelectedWorker(event.target.value)}
+            >
+              <option value="">All painters</option>
+              {workers.map((worker) => (
+                <option key={worker._id} value={worker._id}>
+                  {worker.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </Panel>
+      )}
       <div className={`${styles["metric-grid"]} ${styles["compact-metrics"]}`}>
         <Metric
-          label="Total paid to workforce"
+          label={
+            businessType === "PAINTER"
+              ? `${filteredWorkerName} cash paid`
+              : "Total paid to workforce"
+          }
           value={money(totalPaid)}
-          detail="Wages, advances and adjustments"
+          detail={
+            businessType === "PAINTER"
+              ? "Painter payout ledger"
+              : "Wages, advances and adjustments"
+          }
           tone="coral"
           icon={ArrowUpRight}
         />
         <Metric
-          label="Payment records"
+          label={
+            businessType === "PAINTER"
+              ? "Painter payment records"
+              : "Labour payment records"
+          }
           value={payments.length}
-          detail="Visible payout entries"
+          detail={
+            businessType === "PAINTER"
+              ? "Visible painter entries"
+              : "Visible labour payout entries"
+          }
           tone="purple"
           icon={Landmark}
         />
@@ -253,9 +341,8 @@ export function PaymentsPage() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Worker / category</th>
+                <th>Worker</th>
                 <th>Type</th>
-                <th>Work record</th>
                 <th>Method</th>
                 <th>Amount</th>
                 <th></th>
@@ -269,11 +356,7 @@ export function PaymentsPage() {
                     <strong>
                       {payment.worker?.name || "Business expense"}
                     </strong>
-                    <small>
-                      {payment.worker
-                        ? typeTitle(payment.worker.type)
-                        : payment.notes || "Expense"}
-                    </small>
+                    <small>{payment.notes || "Workforce payment"}</small>
                   </td>
                   <td>
                     <Status
@@ -282,7 +365,6 @@ export function PaymentsPage() {
                       {payment.kind.replace("_", " ")}
                     </Status>
                   </td>
-                  <td>{payment.assignment?.siteName || "—"}</td>
                   <td>{payment.method}</td>
                   <td className={`${styles["amount"]} ${styles["expense"]}`}>
                     −{money(payment.amount)}
@@ -300,10 +382,18 @@ export function PaymentsPage() {
               ))}
               {!payments.length && (
                 <tr>
-                  <td colSpan="7">
+                  <td colSpan="6">
                     <Empty
-                      title="No workforce payments"
-                      detail="Record wages or advances for a labour worker or painter."
+                      title={
+                        businessType === "PAINTER"
+                          ? "No painter payments"
+                          : "No labour payments"
+                      }
+                      detail={
+                        businessType === "PAINTER"
+                          ? "Record painter advances, wages or expense payouts."
+                          : "Record labour wages, advances or payout adjustments."
+                      }
                     />
                   </td>
                 </tr>
@@ -314,6 +404,7 @@ export function PaymentsPage() {
       </Panel>
       {adding && (
         <PaymentForm
+          businessType={businessType}
           onClose={() => setAdding(false)}
           onSaved={(payment) => {
             setAdding(false);

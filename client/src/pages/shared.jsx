@@ -1,8 +1,8 @@
 import styles from "../styles/design.module.css";
 export const errorMessage = (error) =>
   error?.message || "Unable to save changes.";
-export const typeTitle = (type) => (type === "PAINTER" ? "Painter" : "Labour");
-export const typeClass = (type) => (type === "PAINTER" ? "purple" : "teal");
+export const typeTitle = () => "Labour";
+export const typeClass = () => "teal";
 
 export function Metric({
   label,
@@ -40,12 +40,6 @@ export function SectionTabs({ value, onChange, showAttendance = false }) {
         onClick={() => onChange("LABOUR")}
       >
         Labour supply
-      </button>
-      <button
-        className={value === "PAINTER" ? styles.active : ""}
-        onClick={() => onChange("PAINTER")}
-      >
-        Painter supply
       </button>
       {showAttendance && (
         <button

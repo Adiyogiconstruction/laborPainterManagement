@@ -1,5 +1,6 @@
 import { Router } from "express";
 import DailyEntry from "../models/DailyEntry.js";
+import Worker from "../models/Worker.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { dateRange, pick } from "../utils/serializers.js";
@@ -16,8 +17,6 @@ const editable = [
   "quantity",
   "unit",
   "status",
-  "paintPurchased",
-  "paintUsed",
   "expenseAmount",
   "expenseCategory",
   "notes",
@@ -31,6 +30,13 @@ router.get(
     if (req.query.client) filter.client = req.query.client;
     if (req.query.siteName)
       filter.siteName = new RegExp(req.query.siteName, "i");
+    if (req.query.type && !req.query.worker) {
+      const workers = await Worker.find({ type: "LABOUR" }).select("_id");
+      const workerIds = workers.map((worker) => worker._id);
+      if (workerIds.length) {
+        filter.worker = { $in: workerIds };
+      }
+    }
     const range = dateRange(req.query);
     if (range) filter.date = range;
     const entries = await DailyEntry.find(filter)

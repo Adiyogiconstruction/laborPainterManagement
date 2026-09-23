@@ -13,7 +13,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Paintbrush,
   Settings,
   ShieldCheck,
   UsersRound,
@@ -31,48 +30,79 @@ import {
   PaymentsPage,
   ReportsPage,
   WorkersPage,
-  DprPage,
-  PaintPage,
 } from "../pages/index.js";
 import styles from "../styles/design.module.css";
 
-const navGroups = [
-  { label: "Overview", items: [["/", "Dashboard", LayoutDashboard]] },
+const labourNavGroups = [
   {
-    label: "Workforce",
-    items: [["/workers", "Workforce", UsersRound]],
-  },
-  {
-    label: "Operations",
+    label: "Overview",
     items: [
-      ["/clients", "Clients & Sites", Building2],
-      ["/work", "Work Supply", BriefcaseBusiness],
-      ["/dpr", "Daily DPR", CalendarDays],
-      ["/paint", "Paint Ledger", Paintbrush],
+      ["/labour", "Dashboard", LayoutDashboard],
+      ["/labour/reports", "Reports", ChartNoAxesCombined],
     ],
   },
   {
-    label: "Finance",
+    label: "Work operations",
     items: [
-      ["/payments", "Payments", WalletCards],
-      ["/reports", "Reports", ChartNoAxesCombined],
+      ["/labour/workers", "Workforce", UsersRound],
+      ["/labour/attendance", "Attendance", CalendarDays],
+      ["/labour/payments", "Payments", WalletCards],
+    ],
+  },
+  {
+    label: "Clients & sites",
+    items: [
+      ["/labour/clients", "Clients & Sites", Building2],
+      ["/labour/work", "Work Supply", BriefcaseBusiness],
     ],
   },
 ];
 
+const labourRoutes = (
+  <>
+    <Route path="/labour" element={<DashboardPage businessType="LABOUR" />} />
+    <Route
+      path="/labour/workers"
+      element={<WorkersPage businessType="LABOUR" />}
+    />
+    <Route
+      path="/labour/attendance"
+      element={<AttendancePage businessType="LABOUR" />}
+    />
+    <Route
+      path="/labour/clients"
+      element={<ClientsPage businessType="LABOUR" />}
+    />
+    <Route
+      path="/labour/work"
+      element={<AssignmentsPage businessType="LABOUR" />}
+    />
+    <Route
+      path="/labour/payments"
+      element={<PaymentsPage businessType="LABOUR" />}
+    />
+    <Route
+      path="/labour/reports"
+      element={<ReportsPage businessType="LABOUR" />}
+    />
+  </>
+);
+
 const navLinkClass = (to, label, isActive, location) => {
-  const active =
-    label === "Workforce"
-      ? ["/workers", "/attendance"].includes(location.pathname)
-      : to.startsWith("/workers?")
-        ? `${location.pathname}${location.search}` === to
-        : isActive;
+  const active = to.startsWith("/workers?")
+    ? `${location.pathname}${location.search}` === to
+    : isActive;
   return `${active ? styles.active : ""} ${label === "Dashboard" ? styles["nav-primary"] : ""}`;
 };
 
 export function AppShell({ session, onLogout }) {
+  const user = session?.user;
   const [open, setOpen] = useState(false);
+  if (!user?.name || !user?.role) return null;
   const location = useLocation();
+  const businessType = "LABOUR";
+  const activeNavGroups = labourNavGroups;
+  const workspaceTitle = "Labour Management";
   const close = () => setOpen(false);
   return (
     <div className={`${styles["app-shell"]}`}>
@@ -97,28 +127,32 @@ export function AppShell({ session, onLogout }) {
           </button>
         </div>
         <nav>
-          {navGroups.map((group) => (
+          {activeNavGroups.map((group) => (
             <div className={`${styles["nav-group"]}`} key={group.label}>
               <span className={`${styles["nav-group-label"]}`}>
                 {group.label}
               </span>
-              {group.items.map(([to, label, Icon]) => (
-                <NavLink
-                  key={label}
-                  to={to}
-                  end={to === "/"}
-                  onClick={close}
-                  className={({ isActive }) =>
-                    navLinkClass(to, label, isActive, location)
-                  }
-                >
-                  <Icon size={label === "Dashboard" ? 21 : 19} />
-                  <span>{label}</span>
-                </NavLink>
-              ))}
+              {group.items
+                .filter(
+                  ([, , , ownerOnly]) => !ownerOnly || user.role === "OWNER",
+                )
+                .map(([to, label, Icon]) => (
+                  <NavLink
+                    key={label}
+                    to={to}
+                    end={label === "Dashboard"}
+                    onClick={close}
+                    className={({ isActive }) =>
+                      navLinkClass(to, label, isActive, location)
+                    }
+                  >
+                    <Icon size={label === "Dashboard" ? 21 : 19} />
+                    <span>{label}</span>
+                  </NavLink>
+                ))}
             </div>
           ))}
-          {session.user.role === "OWNER" && (
+          {user.role === "OWNER" && (
             <NavLink
               to="/admins"
               onClick={close}
@@ -133,11 +167,11 @@ export function AppShell({ session, onLogout }) {
         </nav>
         <div className={`${styles["profile"]}`}>
           <div className={`${styles["avatar"]}`}>
-            {session.user.name.slice(0, 1).toUpperCase()}
+            {user.name.slice(0, 1).toUpperCase()}
           </div>
           <div>
-            <strong>{session.user.name}</strong>
-            <span>{session.user.role}</span>
+            <strong>{user.name}</strong>
+            <span>{user.role}</span>
           </div>
           <button
             className={`${styles["icon-button"]}`}
@@ -164,7 +198,7 @@ export function AppShell({ session, onLogout }) {
             <Menu size={22} />
           </button>
           <div className={`${styles["topbar-context"]}`}>
-            <span>Business Management System</span>
+            <span>{workspaceTitle}</span>
             <strong>
               {new Intl.DateTimeFormat("en-IN", {
                 weekday: "long",
@@ -174,24 +208,17 @@ export function AppShell({ session, onLogout }) {
             </strong>
           </div>
           <div className={`${styles["secure-note"]}`}>
-            <ShieldCheck size={17} /> Secure workspace
+            <ShieldCheck size={17} /> {businessType} workspace
           </div>
         </header>
         <div className={`${styles["page-wrap"]}`}>
           <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/workers" element={<WorkersPage />} />
-            <Route path="/attendance" element={<AttendancePage />} />
-            <Route path="/clients" element={<ClientsPage />} />
-            <Route path="/work" element={<AssignmentsPage />} />
-            <Route path="/dpr" element={<DprPage />} />
-            <Route path="/paint" element={<PaintPage />} />
-            <Route path="/payments" element={<PaymentsPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/" element={<Navigate to="/labour" replace />} />
+            {labourRoutes}
             <Route
               path="/admins"
               element={
-                session.user.role === "OWNER" ? (
+                user.role === "OWNER" ? (
                   <AdminsPage />
                 ) : (
                   <Navigate to="/" replace />

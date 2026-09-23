@@ -1,52 +1,141 @@
-import { Router } from 'express';
-import User from '../models/User.js';
-import { allowRoles, requireAuth, signToken } from '../middleware/auth.js';
-import { ApiError, asyncHandler } from '../utils/asyncHandler.js';
-import { safeUser } from '../utils/serializers.js';
+import { Router } from "express";
+import User from "../models/User.js";
+import { allowRoles, requireAuth, signToken } from "../middleware/auth.js";
+import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
+import { safeUser } from "../utils/serializers.js";
+import { rateLimit } from "express-rate-limit";
+import { clearSessionCookie, setSessionCookie } from "../utils/session.js";
 
 const router = Router();
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { message: "Too many authentication attempts. Try again later." },
+});
 
-router.get('/setup-status', asyncHandler(async (_req, res) => {
-  res.json({ needsSetup: (await User.countDocuments()) === 0 });
-}));
+router.get(
+  "/setup-status",
+  asyncHandler(async (_req, res) => {
+    res.json({ needsSetup: (await User.countDocuments()) === 0 });
+  }),
+);
 
-router.post('/setup', asyncHandler(async (req, res) => {
-  if (await User.countDocuments()) throw new ApiError(409, 'The workspace has already been set up.');
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) throw new ApiError(400, 'Name, email and password are required.');
-  const user = await User.create({ name, email, password, role: 'OWNER' });
-  res.status(201).json({ token: signToken(user), user: safeUser(user) });
-}));
+router.post(
+  "/setup",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    if (await User.countDocuments())
+      throw new ApiError(409, "The workspace has already been set up.");
+    const { name, email, password } = req.body;
+    if (!name || !email || !password)
+      throw new ApiError(400, "Name, email and password are required.");
+    if (String(password).length < 8 || String(password).length > 128)
+      throw new ApiError(400, "Password must be between 8 and 128 characters.");
+    const user = await User.create({ name, email, password, role: "OWNER" });
+    setSessionCookie(res, signToken(user));
+    res.status(201).json({ user: safeUser(user) });
+  }),
+);
 
-router.post('/login', asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) throw new ApiError(400, 'Email and password are required.');
-  const user = await User.findOne({ email: String(email).toLowerCase() }).select('+password');
-  if (!user || !user.active || !(await user.matchesPassword(password))) throw new ApiError(401, 'Incorrect email or password.');
-  res.json({ token: signToken(user), user: safeUser(user) });
-}));
+router.post(
+  "/login",
+  authRateLimit,
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password)
+      throw new ApiError(400, "Email and password are required.");
+    if (String(email).length > 254 || String(password).length > 128)
+      throw new ApiError(400, "Invalid email or password.");
+    const user = await User.findOne({
+      email: String(email).toLowerCase(),
+    }).select("+password");
+    if (!user || !user.active || !(await user.matchesPassword(password)))
+      throw new ApiError(401, "Incorrect email or password.");
+    setSessionCookie(res, signToken(user));
+    res.json({ user: safeUser(user) });
+  }),
+);
 
-router.get('/me', requireAuth, (req, res) => res.json({ user: safeUser(req.user) }));
+router.post("/logout", (_req, res) => {
+  clearSessionCookie(res);
+  res.status(204).end();
+});
 
-router.get('/admins', requireAuth, allowRoles('OWNER'), asyncHandler(async (_req, res) => {
-  const users = await User.find().sort({ createdAt: -1 });
-  res.json({ users: users.map(safeUser) });
-}));
+router.get("/me", requireAuth, (req, res) =>
+  res.json({ user: safeUser(req.user) }),
+);
 
-router.post('/admins', requireAuth, allowRoles('OWNER'), asyncHandler(async (req, res) => {
-  const { name, email, password, role = 'ADMIN' } = req.body;
-  if (!name || !email || !password) throw new ApiError(400, 'Name, email and password are required.');
-  const user = await User.create({ name, email, password, role });
-  res.status(201).json({ user: safeUser(user) });
-}));
+router.get(
+  "/admins",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (_req, res) => {
+    const users = await User.find().sort({ createdAt: -1 });
+    res.json({ users: users.map(safeUser) });
+  }),
+);
 
-router.patch('/admins/:id', requireAuth, allowRoles('OWNER'), asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
-  if (!user) throw new ApiError(404, 'Admin not found.');
-  if (user.id === req.user.id && req.body.active === false) throw new ApiError(400, 'You cannot deactivate your own account.');
-  ['name', 'role', 'active'].forEach((field) => { if (req.body[field] !== undefined) user[field] = req.body[field]; });
-  await user.save();
-  res.json({ user: safeUser(user) });
-}));
+router.post(
+  "/admins",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (req, res) => {
+    const { name, email, password, role = "ADMIN" } = req.body;
+    if (!name || !email || !password)
+      throw new ApiError(400, "Name, email and password are required.");
+    if (String(password).length < 8 || String(password).length > 128)
+      throw new ApiError(400, "Password must be between 8 and 128 characters.");
+    if (!["ADMIN", "VIEWER"].includes(role))
+      throw new ApiError(400, "Invalid admin role.");
+    const user = await User.create({ name, email, password, role });
+    res.status(201).json({ user: safeUser(user) });
+  }),
+);
+
+router.patch(
+  "/admins/:id",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+    if (!user) throw new ApiError(404, "Admin not found.");
+    if (user.id === req.user.id && req.body.active === false)
+      throw new ApiError(400, "You cannot deactivate your own account.");
+    if (
+      req.body.role !== undefined &&
+      !["ADMIN", "VIEWER"].includes(req.body.role)
+    )
+      throw new ApiError(400, "Invalid admin role.");
+    ["name", "role", "active"].forEach((field) => {
+      if (req.body[field] !== undefined) user[field] = req.body[field];
+    });
+    await user.save();
+    res.json({ user: safeUser(user) });
+  }),
+);
+
+router.patch(
+  "/admins/:id/password",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (req, res) => {
+    const password = String(req.body.password || "");
+    if (password.length < 8)
+      throw new ApiError(400, "Password must be at least 8 characters.");
+    const user = await User.findById(req.params.id).select("+password");
+    if (!user) throw new ApiError(404, "Admin not found.");
+    if (user.role === "OWNER")
+      throw new ApiError(
+        400,
+        "Owner password cannot be reset from admin access.",
+      );
+    user.password = password;
+    await user.save();
+    res.json({ ok: true });
+  }),
+);
 
 export default router;

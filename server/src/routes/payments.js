@@ -1,6 +1,7 @@
 import { Router } from "express";
 import Payment from "../models/Payment.js";
 import Assignment from "../models/Assignment.js";
+import Worker from "../models/Worker.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { dateRange, pick } from "../utils/serializers.js";
@@ -26,6 +27,16 @@ router.get(
     ["flow", "kind", "worker", "client", "assignment"].forEach((field) => {
       if (req.query[field]) filter[field] = req.query[field];
     });
+    if (req.query.type) {
+      const [assignments, workers] = await Promise.all([
+        Assignment.find({ type: req.query.type }).select("_id"),
+        Worker.find({ type: req.query.type }).select("_id"),
+      ]);
+      filter.$or = [
+        { assignment: { $in: assignments.map((item) => item._id) } },
+        { worker: { $in: workers.map((item) => item._id) } },
+      ];
+    }
     const range = dateRange(req.query);
     if (range) filter.paidOn = range;
     const payments = await Payment.find(filter)
@@ -48,6 +59,8 @@ router.post(
     if (data.assignment) {
       const assignment = await Assignment.findById(data.assignment);
       if (!assignment) throw new ApiError(404, "Work record not found.");
+      if (req.body.type && req.body.type !== assignment.type)
+        throw new ApiError(400, "Payment does not belong to this workspace.");
       if (data.flow === "INFLOW") data.client = assignment.client;
       if (data.flow === "OUTFLOW" && data.kind !== "EXPENSE")
         data.worker = assignment.worker;

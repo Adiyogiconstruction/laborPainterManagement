@@ -44,44 +44,62 @@ import {
   typeTitle,
 } from "./shared.jsx";
 
-function ClientForm({ initial, onClose, onSaved }) {
+function ClientForm({ businessType, initial, onClose, onSaved }) {
   const [form, setForm] = useState(
     initial
       ? {
-          ...initial,
-          siteNames: initial.sites?.map((site) => site.name).join(", ") || "",
+          name: initial.name || "",
+          businessType: initial.businessType || businessType,
+          siteRows: initial.sites?.length
+            ? initial.sites.map((site) => ({
+                name: site.name || "",
+              }))
+            : [{ name: "" }],
         }
       : {
           name: "",
-          contactPerson: "",
-          phone: "",
-          identityType: "AADHAAR",
-          identityNumber: "",
-          gstin: "",
-          panNumber: "",
-          placeOfSupply: "",
-          billingAddress: "",
-          siteNames: "",
-          notes: "",
+          businessType,
+          siteRows: [{ name: "" }],
         },
   );
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      businessType,
+    }));
+  }, [businessType]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const change = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
+  const changeSite = (index, field) => (event) =>
+    setForm({
+      ...form,
+      siteRows: form.siteRows.map((site, siteIndex) =>
+        siteIndex === index ? { ...site, [field]: event.target.value } : site,
+      ),
+    });
+  const addSite = () =>
+    setForm({
+      ...form,
+      siteRows: [...form.siteRows, { name: "" }],
+    });
+  const removeSite = (index) =>
+    setForm({
+      ...form,
+      siteRows: form.siteRows.filter((_, siteIndex) => siteIndex !== index),
+    });
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      const { siteNames, ...rest } = form;
       const body = {
-        ...rest,
-        sites: siteNames
-          .split(",")
-          .map((name) => name.trim())
-          .filter(Boolean)
-          .map((name) => ({ name })),
+        name: form.name.trim(),
+        businessType: form.businessType,
+        sites: form.siteRows
+          .map((site) => ({ name: site.name.trim() }))
+          .filter((site) => site.name),
       };
       const data = initial
         ? await request(api.patch(`/clients/${initial._id}`, body))
@@ -105,83 +123,49 @@ function ClientForm({ initial, onClose, onSaved }) {
             placeholder="e.g. ABC Constructions"
           />
         </Field>
-        <Field label="Contact person">
+        <Field label="Management section">
           <input
-            value={form.contactPerson || ""}
-            onChange={change("contactPerson")}
-            placeholder="Optional"
+            value={businessType === "PAINTER" ? "Painter" : "Labour"}
+            readOnly
           />
         </Field>
-        <Field label="Phone" hint="Required">
-          <input
-            required
-            value={form.phone || ""}
-            onChange={change("phone")}
-            placeholder="Client phone number"
-          />
-        </Field>
-        <Field label="Identity document">
-          <select
-            required
-            value={form.identityType || "AADHAAR"}
-            onChange={change("identityType")}
-          >
-            <option value="AADHAAR">Aadhaar</option>
-            <option value="PAN">PAN</option>
-          </select>
-        </Field>
-        <Field label="Aadhaar / PAN number" hint="Required">
-          <input
-            required
-            value={form.identityNumber || ""}
-            onChange={change("identityNumber")}
-            placeholder={
-              form.identityType === "PAN" ? "PAN number" : "Aadhaar number"
-            }
-          />
-        </Field>
-        <Field label="Client sites" hint="Separate sites with commas">
-          <input
-            value={form.siteNames}
-            onChange={change("siteNames")}
-            placeholder="Tower A, Warehouse B"
-          />
-        </Field>
-        <Field label="Billing address">
-          <input
-            value={form.billingAddress || ""}
-            onChange={change("billingAddress")}
-            placeholder="Optional"
-          />
-        </Field>
-        <Field label="GSTIN" hint="Optional for non-GST clients">
-          <input
-            value={form.gstin || ""}
-            onChange={change("gstin")}
-            placeholder="e.g. 36AAJCP7575R1ZA"
-          />
-        </Field>
-        <Field label="PAN number">
-          <input
-            value={form.panNumber || ""}
-            onChange={change("panNumber")}
-            placeholder="e.g. AAJCP7575R"
-          />
-        </Field>
-        <Field label="Place of supply">
-          <input
-            value={form.placeOfSupply || ""}
-            onChange={change("placeOfSupply")}
-            placeholder="e.g. Telangana"
-          />
-        </Field>
-        <Field label="Notes">
-          <input
-            value={form.notes || ""}
-            onChange={change("notes")}
-            placeholder="Optional notes"
-          />
-        </Field>
+        <div className={`${styles["site-editor"]}`}>
+          <div className={`${styles["site-editor-head"]}`}>
+            <div>
+              <strong>Client sites</strong>
+              <small>Track each site separately</small>
+            </div>
+            <Button
+              type="button"
+              icon={Plus}
+              className={`${styles["button-secondary"]}`}
+              onClick={addSite}
+            >
+              Add site
+            </Button>
+          </div>
+          <div className={`${styles["site-rows"]}`}>
+            {form.siteRows.map((site, index) => (
+              <div className={`${styles["site-row"]}`} key={index}>
+                <input
+                  aria-label={`Site ${index + 1} name`}
+                  value={site.name}
+                  onChange={changeSite(index, "name")}
+                  placeholder="Site name"
+                />
+                <button
+                  type="button"
+                  className={`${styles["icon-button"]}`}
+                  onClick={() => removeSite(index)}
+                  aria-label={`Remove site ${index + 1}`}
+                  title="Remove site"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className={`${styles["modal-actions"]}`}>
           <ErrorNote error={error} />
           <Button
@@ -200,7 +184,7 @@ function ClientForm({ initial, onClose, onSaved }) {
   );
 }
 
-export function ClientsPage() {
+export function ClientsPage({ businessType = "LABOUR" }) {
   const [clients, setClients] = useState([]);
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
@@ -208,13 +192,13 @@ export function ClientsPage() {
   const [deleting, setDeleting] = useState();
   const [error, setError] = useState("");
   const load = () =>
-    request(api.get("/clients", { params: { search } }))
+    request(api.get("/clients", { params: { search, type: businessType } }))
       .then(({ clients: result }) => setClients(result))
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
     const timer = setTimeout(load, search ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, businessType]);
   const save = (client) => {
     setAdding(false);
     setEditing(null);
@@ -227,9 +211,17 @@ export function ClientsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="CLIENT DIRECTORY"
-        title="Clients & sites"
-        detail="Keep the people and places you supply in one searchable directory."
+        eyebrow={
+          businessType === "PAINTER"
+            ? "PAINTER CLIENT DIRECTORY"
+            : "LABOUR CLIENT DIRECTORY"
+        }
+        title={`${businessType === "PAINTER" ? "Painter" : "Labour"} clients & sites`}
+        detail={
+          businessType === "PAINTER"
+            ? "Keep all painter clients, locations and site details in one searchable directory."
+            : "Keep all labour clients, locations and site details in one searchable directory."
+        }
         action={
           <AddButton
             className={`${styles["button-primary"]}`}
@@ -244,7 +236,11 @@ export function ClientsPage() {
           <SearchBox
             value={search}
             onChange={setSearch}
-            placeholder="Search client name…"
+            placeholder={
+              businessType === "PAINTER"
+                ? "Search painter client name…"
+                : "Search labour client name…"
+            }
           />
         }
       >
@@ -254,9 +250,7 @@ export function ClientsPage() {
             <thead>
               <tr>
                 <th>Client</th>
-                <th>Contact</th>
                 <th>Sites</th>
-                <th>Billing address</th>
                 <th></th>
               </tr>
             </thead>
@@ -265,14 +259,6 @@ export function ClientsPage() {
                 <tr key={client._id}>
                   <td>
                     <strong>{client.name}</strong>
-                    <small>
-                      {client.identityType || "ID"}:{" "}
-                      {client.identityNumber || "—"}
-                    </small>
-                  </td>
-                  <td>
-                    <strong>{client.contactPerson || "—"}</strong>
-                    <small>{client.phone || "No phone"}</small>
                   </td>
                   <td>
                     {client.sites?.length
@@ -286,7 +272,6 @@ export function ClientsPage() {
                         ))
                       : "—"}
                   </td>
-                  <td>{client.billingAddress || "—"}</td>
                   <td className={`${styles["actions"]}`}>
                     <button
                       className={`${styles["icon-button"]}`}
@@ -319,9 +304,16 @@ export function ClientsPage() {
           </table>
         </div>
       </Panel>
-      {adding && <ClientForm onClose={() => setAdding(false)} onSaved={save} />}{" "}
+      {adding && (
+        <ClientForm
+          businessType={businessType}
+          onClose={() => setAdding(false)}
+          onSaved={save}
+        />
+      )}
       {editing && (
         <ClientForm
+          businessType={businessType}
           initial={editing}
           onClose={() => setEditing(null)}
           onSaved={save}

@@ -46,66 +46,48 @@ import {
 
 function AssignmentForm({ type, initial, onClose, onSaved }) {
   const [clients, setClients] = useState([]);
-  const [workers, setWorkers] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(
     initial
       ? {
-          ...initial,
+          type: initial.type,
           client: initial.client?._id || initial.client,
-          workers:
-            initial.workers?.map((worker) => worker._id || worker) ||
-            (initial.worker ? [initial.worker?._id || initial.worker] : []),
+          siteName: initial.siteName || "",
           startDate: inputDate(initial.startDate),
+          headCount: initial.headCount || 1,
+          workDays: initial.workDays || 1,
+          clientRate: initial.clientRate ?? "",
+          unit: initial.unit || "DAY",
+          billingAmount: initial.billingAmount || "",
+          status: initial.status || "ACTIVE",
         }
       : {
           type,
           client: "",
-          workers: [],
           siteName: "",
-          workDescription: "",
           startDate: inputDate(),
           headCount: 1,
           workDays: 1,
           clientRate: "",
-          workerRate: "",
           unit: "DAY",
           billingAmount: "",
-          payoutAmount: "",
           status: "ACTIVE",
-          notes: "",
         },
   );
   useEffect(() => {
-    Promise.all([
-      request(api.get("/clients", { params: { active: true } })),
-      request(api.get("/workers", { params: { active: true, type } })),
-    ])
-      .then(([clientData, workerData]) => {
-        setClients(clientData.clients);
-        setWorkers(workerData.workers);
-      })
+    request(api.get("/clients", { params: { active: true, type } }))
+      .then((clientData) => setClients(clientData.clients))
       .catch((err) => setError(errorMessage(err)));
-  }, [type]);
+  }, []);
   const change = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
-  const toggleWorker = (workerId) =>
-    setForm({
-      ...form,
-      workers: form.workers.includes(workerId)
-        ? form.workers.filter((id) => id !== workerId)
-        : [...form.workers, workerId],
-    });
   const calculated = useMemo(() => {
     const people = Number(form.headCount || 0);
     const days = Number(form.workDays || 0);
     const clientMultiplier = form.unit === "DAY" ? people * days : 1;
-    const workerMultiplier =
-      form.unit === "DAY" ? people * days : form.unit === "JOB" ? people : 1;
     return {
       client: Number(form.clientRate || 0) * clientMultiplier,
-      worker: Number(form.workerRate || 0) * workerMultiplier,
     };
   }, [form]);
   const save = async (event) => {
@@ -118,9 +100,7 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
         headCount: Number(form.headCount),
         workDays: Number(form.workDays),
         clientRate: Number(form.clientRate || 0),
-        workerRate: Number(form.workerRate || 0),
         billingAmount: calculated.client,
-        payoutAmount: calculated.worker,
       };
       const data = initial
         ? await request(api.patch(`/assignments/${initial._id}`, payload))
@@ -143,12 +123,6 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
         className={`${styles["form-grid"]} ${styles["three-col"]}`}
         onSubmit={save}
       >
-        <Field label="Supply type">
-          <select value={form.type} onChange={change("type")}>
-            <option value="LABOUR">Labour supply</option>
-            <option value="PAINTER">Painter supply</option>
-          </select>
-        </Field>
         <Field label="Client">
           <select
             required
@@ -160,7 +134,7 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
               setForm({
                 ...form,
                 client: event.target.value,
-                siteName: client?.sites?.[0]?.name || form.siteName,
+                siteName: client?.sites?.[0]?.name || "",
               });
             }}
           >
@@ -172,43 +146,24 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
             ))}
           </select>
         </Field>
-        <Field label="Worker">
-          <div className={`${styles["worker-checkboxes"]}`}>
-            {workers.map((worker) => (
-              <label key={worker._id}>
-                <input
-                  type="checkbox"
-                  checked={form.workers.includes(worker._id)}
-                  onChange={() => toggleWorker(worker._id)}
-                />
-                <span>
-                  {worker.name} · {worker.skill || typeTitle(worker.type)}
-                </span>
-              </label>
-            ))}
-          </div>
-        </Field>
         <Field label="Site / project">
-          <input
+          <select
             required
-            list="client-sites"
             value={form.siteName}
             onChange={change("siteName")}
-            placeholder="Project site name"
-          />
-          <datalist id="client-sites">
+            disabled={!chosenClient?.sites?.length}
+          >
+            <option value="">
+              {chosenClient?.sites?.length
+                ? "Select site"
+                : "Select client first"}
+            </option>
             {chosenClient?.sites?.map((site) => (
-              <option key={site._id || site.name} value={site.name} />
+              <option key={site._id || site.name} value={site.name}>
+                {site.name}
+              </option>
             ))}
-          </datalist>
-        </Field>
-        <Field label="Work description">
-          <input
-            required
-            value={form.workDescription}
-            onChange={change("workDescription")}
-            placeholder="e.g. Tiles loading, wall painting"
-          />
+          </select>
         </Field>
         <Field label="Work status">
           <select value={form.status} onChange={change("status")}>
@@ -272,18 +227,6 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
             placeholder="₹ rate"
           />
         </Field>
-        <Field label="Worker payout rate" hint="Required: rate entered by user">
-          <input
-            required
-            min="0"
-            type="text"
-            inputMode="decimal"
-            pattern="[0-9]*[.]?[0-9]*"
-            value={form.workerRate}
-            onChange={change("workerRate")}
-            placeholder="₹ rate"
-          />
-        </Field>
         <Field
           label="Billing amount"
           hint={`Fixed client amount: ${money(calculated.client)}`}
@@ -297,28 +240,6 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
             disabled
             readOnly
             aria-label="Calculated billing amount"
-          />
-        </Field>
-        <Field
-          label="Payout amount"
-          hint={`Worker total for ${form.headCount || 0} people: ${money(calculated.worker)}`}
-        >
-          <input
-            min="0"
-            type="text"
-            inputMode="decimal"
-            pattern="[0-9]*[.]?[0-9]*"
-            value={calculated.worker}
-            disabled
-            readOnly
-            aria-label="Calculated payout amount"
-          />
-        </Field>
-        <Field label="Notes">
-          <input
-            value={form.notes || ""}
-            onChange={change("notes")}
-            placeholder="Optional notes"
           />
         </Field>
         <div className={`${styles["modal-actions"]}`}>
@@ -339,9 +260,10 @@ function AssignmentForm({ type, initial, onClose, onSaved }) {
   );
 }
 
-export function AssignmentsPage() {
-  const [type, setType] = useState("LABOUR");
+export function AssignmentsPage({ businessType = "LABOUR" }) {
+  const type = businessType;
   const [records, setRecords] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [adding, setAdding] = useState(false);
@@ -356,6 +278,33 @@ export function AssignmentsPage() {
     const timer = setTimeout(load, search ? 250 : 0);
     return () => clearTimeout(timer);
   }, [type, status, search]);
+  useEffect(() => {
+    request(api.get("/payments", { params: { type } }))
+      .then(({ payments: result }) => setPayments(result))
+      .catch(() => setPayments([]));
+  }, [type]);
+  const paymentSummaryByAssignment = payments.reduce((map, payment) => {
+    if (payment.flow !== "INFLOW" || !payment.assignment) return map;
+    const key = String(payment.assignment._id || payment.assignment);
+    map[key] = (map[key] || 0) + Number(payment.amount || 0);
+    return map;
+  }, {});
+  const billingStatus = (record) => {
+    const received = Number(
+      paymentSummaryByAssignment[String(record._id)] || 0,
+    );
+    const expected = Number(record.billingAmount || 0);
+    if (record.status === "CANCELLED")
+      return { label: "Cancelled", tone: "neutral" };
+    if (record.status === "ACTIVE" || record.status === "ON_HOLD") {
+      return received > 0
+        ? { label: "Claimed to Client", tone: "amber" }
+        : { label: "In Progress", tone: "blue" };
+    }
+    if (received >= expected) return { label: "Paid", tone: "teal" };
+    if (received > 0) return { label: "Claimed to Client", tone: "amber" };
+    return { label: "Billing pending", tone: "coral" };
+  };
   const save = (record) => {
     setAdding(false);
     setEditing(null);
@@ -369,8 +318,16 @@ export function AssignmentsPage() {
     <>
       <PageHeader
         eyebrow="DAILY OPERATIONS"
-        title="Work supply records"
-        detail="Track how many people were supplied, where they worked, and the exact money involved."
+        title={
+          type === "PAINTER"
+            ? "Painter work supply records"
+            : "Labour work supply records"
+        }
+        detail={
+          type === "PAINTER"
+            ? "Track painter work supply, site assignments and exact money involved."
+            : "Track labour work supply, site assignments and exact money involved."
+        }
         action={
           <AddButton
             className={`${styles["button-primary"]}`}
@@ -381,7 +338,6 @@ export function AssignmentsPage() {
         }
       />
       <div className={`${styles["toolbar"]}`}>
-        <SectionTabs value={type} onChange={setType} />
         <select
           value={status}
           onChange={(event) => setStatus(event.target.value)}
@@ -395,7 +351,7 @@ export function AssignmentsPage() {
         <SearchBox
           value={search}
           onChange={setSearch}
-          placeholder="Search site or work…"
+          placeholder="Search site…"
         />
       </div>
       <Panel>
@@ -409,69 +365,65 @@ export function AssignmentsPage() {
                 <th>People</th>
                 <th>Period</th>
                 <th>Client bill</th>
-                <th>Worker cost</th>
+                <th>Billing status</th>
                 <th>Status</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {records.map((record) => (
-                <tr key={record._id}>
-                  <td>
-                    <strong>{typeTitle(record.type)} supply</strong>
-                    <small>
-                      {record.workDescription}
-                      {(record.workers?.length || record.worker) && " · "}
-                      {record.workers?.length
-                        ? record.workers.map((worker) => worker.name).join(", ")
-                        : record.worker?.name || ""}
-                    </small>
-                  </td>
-                  <td>
-                    <strong>{record.client?.name}</strong>
-                    <small>{record.siteName}</small>
-                  </td>
-                  <td>
-                    {number(record.headCount)} × {number(record.workDays)} day
-                  </td>
-                  <td>{date(record.startDate)}</td>
-                  <td className={`${styles["amount"]} ${styles["income"]}`}>
-                    {money(record.billingAmount)}
-                  </td>
-                  <td className={`${styles["amount"]}`}>
-                    {money(record.payoutAmount)}
-                  </td>
-                  <td>
-                    <Status
-                      tone={
-                        record.status === "ACTIVE"
-                          ? typeClass(record.type)
-                          : record.status === "COMPLETED"
-                            ? "teal"
-                            : "neutral"
-                      }
-                    >
-                      {record.status.replace("_", " ")}
-                    </Status>
-                  </td>
-                  <td className={`${styles["actions"]}`}>
-                    <button
-                      className={`${styles["icon-button"]}`}
-                      title="Edit record"
-                      onClick={() => setEditing(record)}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      className={`${styles["icon-button"]} ${styles["delete-button"]}`}
-                      title="Delete work record"
-                      onClick={() => setDeleting(record)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {records.map((record) => {
+                const billState = billingStatus(record);
+                return (
+                  <tr key={record._id}>
+                    <td>
+                      <strong>{typeTitle(record.type)} supply</strong>
+                    </td>
+                    <td>
+                      <strong>{record.client?.name}</strong>
+                      <small>{record.siteName}</small>
+                    </td>
+                    <td>
+                      {number(record.headCount)} × {number(record.workDays)} day
+                    </td>
+                    <td>{date(record.startDate)}</td>
+                    <td className={`${styles["amount"]} ${styles["income"]}`}>
+                      {money(record.billingAmount)}
+                    </td>
+                    <td>
+                      <Status tone={billState.tone}>{billState.label}</Status>
+                    </td>
+                    <td>
+                      <Status
+                        tone={
+                          record.status === "ACTIVE"
+                            ? typeClass(record.type)
+                            : record.status === "COMPLETED"
+                              ? "teal"
+                              : "neutral"
+                        }
+                      >
+                        {record.status.replace("_", " ")}
+                      </Status>
+                    </td>
+                    <td className={`${styles["actions"]}`}>
+                      <button
+                        className={`${styles["icon-button"]}`}
+                        title="Edit record"
+                        onClick={() => setEditing(record)}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        className={`${styles["icon-button"]} ${styles["delete-button"]}`}
+                        title="Delete work record"
+                        onClick={() => setDeleting(record)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {!records.length && (
                 <tr>
                   <td colSpan="8">
@@ -503,7 +455,7 @@ export function AssignmentsPage() {
       )}
       {deleting && (
         <DeleteConfirm
-          itemLabel={`work record for ${deleting.worker?.name || "worker"}`}
+          itemLabel={`work record for ${deleting.client?.name || deleting.siteName}`}
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
             await request(api.delete(`/assignments/${deleting._id}`));

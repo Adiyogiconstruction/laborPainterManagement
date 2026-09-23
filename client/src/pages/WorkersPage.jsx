@@ -8,6 +8,7 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  Download,
   FilePlus2,
   History,
   IndianRupee,
@@ -44,11 +45,113 @@ import {
   typeTitle,
 } from "./shared.jsx";
 
+const apiOrigin = (import.meta.env.VITE_API_URL || "/api").replace(
+  /\/api\/?$/,
+  "",
+);
+
+const imageUrl = (worker, urlField, legacyPathField) => {
+  const value = worker[urlField] || worker[legacyPathField];
+  return value?.startsWith("http") ? value : `${apiOrigin}${value || ""}`;
+};
+
+const exportColumns = [
+  ["Name", "name"],
+  ["Team", "teamName"],
+  ["Phone", "phone"],
+  ["Aadhaar number", "aadhaarNumber"],
+  ["Address", "address"],
+  ["Skill", "skill"],
+  ["Work zone", "workZone"],
+  ["Joining date", "joiningDate"],
+  ["PPE kit given", "ppeKitIssuedOn"],
+  ["Default daily rate", "defaultDailyRate"],
+  ["OT hourly rate", "overtimeHourlyRate"],
+  ["Status", "active"],
+  ["Notes", "notes"],
+];
+
+const exportValue = (worker, key) => {
+  if (key === "active") return worker.active ? "Active" : "Inactive";
+  if (key === "joiningDate" || key === "ppeKitIssuedOn") {
+    return worker[key] ? date(worker[key]) : "";
+  }
+  return worker[key] ?? "";
+};
+
+const csvCell = (value) => `"${String(value).replaceAll('"', '""')}"`;
+const htmlValue = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+
+function printWorkers(workers, type) {
+  const printWindow = window.open("", "_blank", "width=1200,height=800");
+  if (!printWindow) return;
+  const headers = exportColumns.map(([label]) => `<th>${label}</th>`).join("");
+  const rows = workers
+    .map(
+      (worker) =>
+        `<tr>${exportColumns
+          .map(
+            ([, key]) =>
+              `<td>${String(exportValue(worker, key)).replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</td>`,
+          )
+          .join("")}</tr>`,
+    )
+    .join("");
+  printWindow.document.write(
+    `<!doctype html><html><head><title>${typeTitle(type)} workforce</title><style>body{font-family:Arial,sans-serif;color:#192827}h1{font-size:20px;font-weight:600}p{color:#71817e;font-size:12px;font-weight:400}table{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th,td{border:1px solid #dce8e5;padding:5px;text-align:left;vertical-align:top;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th{background:#e3f4f0}</style></head><body><h1>${typeTitle(type)} workforce</h1><p>${workers.length} records</p><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print();</script></body></html>`,
+  );
+  printWindow.document.close();
+  printWindow.onload = () => {
+    const attendanceTable = printWindow.document.querySelector("table");
+    attendanceTable
+      ?.querySelectorAll("th:nth-child(2), td:nth-child(2)")
+      .forEach((cell) => cell.remove());
+    printWindow.print();
+  };
+}
+
+function printWorkerProfile(worker, data, period) {
+  const printWindow = window.open("", "_blank", "width=1200,height=900");
+  if (!printWindow) return;
+  const rows = (items, columns) =>
+    items
+      .map(
+        (item) =>
+          `<tr>${columns.map((column) => `<td>${htmlValue(column(item))}</td>`).join("")}</tr>`,
+      )
+      .join("");
+  const summary = data.attendanceSummary || {};
+  const periodText =
+    period.from || period.to
+      ? `${period.from || "Beginning"} to ${period.to || "Today"}`
+      : "All time";
+  printWindow.document.write(
+    `<!doctype html><html><head><title>${htmlValue(worker.name)} worker report</title><style>body{font-family:Arial,sans-serif;color:#192827;padding:24px}h1{margin:0 0 4px;font-size:22px}h2{margin:24px 0 8px;font-size:14px;border-bottom:1px solid #dce8e5;padding-bottom:6px}p{color:#71817e;font-size:11px;margin:4px 0}table{border-collapse:collapse;width:100%;font-size:10px;margin-top:8px}th,td{border:1px solid #dce8e5;padding:6px;text-align:left;vertical-align:top}th{background:#e3f4f0;text-transform:uppercase;font-size:9px}.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px}.metric{border:1px solid #dce8e5;padding:9px}.metric strong{display:block;font-size:15px}.metric span{font-size:9px;color:#71817e}</style></head><body><h1>${htmlValue(worker.name)}</h1><p>${htmlValue(typeTitle(worker.type))} · ${htmlValue(worker.skill || "Worker")} · Report period: ${htmlValue(periodText)}</p><p>Phone: ${htmlValue(worker.phone)} · Team: ${htmlValue(worker.teamName || "—")} · Work zone: ${htmlValue(worker.workZone || "—")}</p><div class="summary"><div class="metric"><strong>${summary.days || 0}</strong><span>Attendance days</span></div><div class="metric"><strong>${summary.presentDays || 0}</strong><span>Present days</span></div><div class="metric"><strong>${summary.doubleDays || 0}</strong><span>Double-work days</span></div><div class="metric"><strong>${htmlValue(money(summary.totalPayable || 0))}</strong><span>Total payable</span></div><div class="metric"><strong>${htmlValue(money(summary.totalPaid || 0))}</strong><span>Paid</span></div></div><h2>Attendance</h2><table><thead><tr><th>Date</th><th>Site / work</th><th>Status</th><th>Units</th><th>Payable</th></tr></thead><tbody>${rows(data.attendance || [], [(item) => date(item.date), (item) => item.assignment?.siteName || "—", (item) => item.status, (item) => item.workUnits || 0, (item) => money(item.payableAmount || 0)])}</tbody></table><h2>Work assignments</h2><table><thead><tr><th>Site / client</th><th>Work</th><th>Start</th><th>Days</th><th>Status</th></tr></thead><tbody>${rows(data.assignments || [], [(item) => item.siteName, (item) => item.workDescription, (item) => date(item.startDate), (item) => item.workDays || 0, (item) => item.status])}</tbody></table><h2>Payment history</h2><table><thead><tr><th>Date</th><th>Type</th><th>Work record</th><th>Amount</th></tr></thead><tbody>${rows(data.payments || [], [(item) => date(item.paidOn), (item) => item.kind, (item) => item.assignment?.siteName || "—", (item) => money(item.amount)])}</tbody></table><script>window.onload=()=>window.print();</script></body></html>`,
+  );
+  printWindow.document.close();
+  printWindow.onload = () => {
+    const tables = printWindow.document.querySelectorAll("table");
+    tables[0]
+      ?.querySelectorAll("th:nth-child(2), td:nth-child(2)")
+      .forEach((cell) => cell.remove());
+    tables[2]
+      ?.querySelectorAll("th:nth-child(3), td:nth-child(3)")
+      .forEach((cell) => cell.remove());
+    printWindow.print();
+  };
+}
+
 function WorkerForm({ type, initial, onClose, onSaved }) {
   const [form, setForm] = useState(
     initial || {
       type,
       name: "",
+      teamName: "",
       phone: "",
       aadhaarNumber: "",
       skill: "",
@@ -65,6 +168,8 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
+  const [aadhaarFrontFile, setAadhaarFrontFile] = useState(null);
+  const [aadhaarBackFile, setAadhaarBackFile] = useState(null);
   const update = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
   const save = async (event) => {
@@ -72,6 +177,9 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
+      if (!initial && (!aadhaarFrontFile || !aadhaarBackFile)) {
+        throw new Error("Please select both Aadhaar front and back images.");
+      }
       const { photoPath, photoUrl, ...workerFields } = form;
       const body = {
         ...workerFields,
@@ -87,6 +195,20 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
         uploadData.append("photo", photoFile);
         const uploaded = await request(
           api.post(`/workers/${worker._id}/photo`, uploadData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          }),
+        );
+        worker = uploaded.worker;
+      }
+      if (aadhaarFrontFile || aadhaarBackFile) {
+        if (!aadhaarFrontFile || !aadhaarBackFile) {
+          throw new Error("Please select both Aadhaar front and back images.");
+        }
+        const aadhaarData = new FormData();
+        aadhaarData.append("aadhaarFront", aadhaarFrontFile);
+        aadhaarData.append("aadhaarBack", aadhaarBackFile);
+        const uploaded = await request(
+          api.post(`/workers/${worker._id}/aadhaar`, aadhaarData, {
             headers: { "Content-Type": "multipart/form-data" },
           }),
         );
@@ -114,6 +236,15 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
             placeholder="Worker name"
           />
         </Field>
+        {type === "LABOUR" && (
+          <Field label="Labour team" hint="Optional">
+            <input
+              value={form.teamName || ""}
+              onChange={update("teamName")}
+              placeholder="e.g. Team A or Ramesh crew"
+            />
+          </Field>
+        )}
         <Field label="Mobile number" hint="Required">
           <input
             required
@@ -164,6 +295,34 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
           />
           {form.photoPath && (
             <small>Existing photo will remain unless replaced.</small>
+          )}
+        </Field>
+        <Field label="Aadhaar card - front" hint="Required for new workers">
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            required={!initial && !form.aadhaarFrontPath}
+            onChange={(event) =>
+              setAadhaarFrontFile(event.target.files?.[0] || null)
+            }
+          />
+          {form.aadhaarFrontPath && (
+            <small>Existing front image will remain unless replaced.</small>
+          )}
+        </Field>
+        <Field label="Aadhaar card - back" hint="Required for new workers">
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            required={!initial && !form.aadhaarBackPath}
+            onChange={(event) =>
+              setAadhaarBackFile(event.target.files?.[0] || null)
+            }
+          />
+          {form.aadhaarBackPath && (
+            <small>Existing back image will remain unless replaced.</small>
           )}
         </Field>
         <Field label="PPE kit given on">
@@ -259,14 +418,70 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
 function WorkerHistory({ worker, onClose }) {
   const [data, setData] = useState();
   const [error, setError] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [period, setPeriod] = useState({ from: "", to: "" });
   useEffect(() => {
-    request(api.get(`/workers/${worker._id}/history`))
+    setData(undefined);
+    setError("");
+    request(api.get(`/workers/${worker._id}/history`, { params: period }))
       .then(setData)
       .catch((err) => setError(errorMessage(err)));
-  }, [worker._id]);
+  }, [worker._id, period]);
+  const applyPeriod = (event) => {
+    event.preventDefault();
+    setPeriod({ from, to });
+  };
   return (
-    <Modal title={`${worker.name} · History`} onClose={onClose} wide>
+    <Modal
+      title={`${worker.name} · History`}
+      onClose={onClose}
+      wide
+      action={
+        <Button
+          icon={Printer}
+          className={`${styles["button-secondary"]}`}
+          disabled={!data}
+          onClick={() => printWorkerProfile(worker, data, period)}
+        >
+          PDF
+        </Button>
+      }
+    >
       <ErrorNote error={error} />
+      <form
+        className={`${styles["toolbar"]} ${styles["filter-bar"]}`}
+        onSubmit={applyPeriod}
+      >
+        <Field label="From date">
+          <input
+            type="date"
+            value={from}
+            onChange={(event) => setFrom(event.target.value)}
+          />
+        </Field>
+        <Field label="To date">
+          <input
+            type="date"
+            value={to}
+            onChange={(event) => setTo(event.target.value)}
+          />
+        </Field>
+        <Button type="submit" className={`${styles["button-primary"]}`}>
+          Apply filter
+        </Button>
+        <Button
+          type="button"
+          className={`${styles["button-ghost"]}`}
+          onClick={() => {
+            setFrom("");
+            setTo("");
+            setPeriod({ from: "", to: "" });
+          }}
+        >
+          All time
+        </Button>
+      </form>
       {!data ? (
         <Empty title="Loading history…" />
       ) : (
@@ -274,7 +489,7 @@ function WorkerHistory({ worker, onClose }) {
           <div className={`${styles["history-profile"]}`}>
             {worker.photoPath ? (
               <img
-                src={`${import.meta.env.VITE_API_URL?.replace(/\/api$/, "") || "http://localhost:5000"}${worker.photoPath}`}
+                src={imageUrl(worker, "photoUrl", "photoPath")}
                 alt={`${worker.name} profile`}
                 className={`${styles["history-profile-photo"]}`}
               />
@@ -290,6 +505,34 @@ function WorkerHistory({ worker, onClose }) {
               </p>
             </div>
           </div>
+          <Panel
+            title="Identity documents"
+            detail={`Aadhaar number: ${worker.aadhaarNumber || "Not provided"}`}
+          >
+            <div className={`${styles["aadhaar-documents"]}`}>
+              {[
+                ["Front", worker.aadhaarFrontPath],
+                ["Back", worker.aadhaarBackPath],
+              ].map(([label, path]) => (
+                <figure className={`${styles["aadhaar-document"]}`} key={label}>
+                  {path ? (
+                    <img
+                      src={
+                        path.startsWith("http") ? path : `${apiOrigin}${path}`
+                      }
+                      alt={`${worker.name} Aadhaar card ${label.toLowerCase()}`}
+                      className={`${styles["aadhaar-document-image"]}`}
+                    />
+                  ) : (
+                    <div className={`${styles["aadhaar-document-missing"]}`}>
+                      Not uploaded
+                    </div>
+                  )}
+                  <figcaption>Aadhaar {label}</figcaption>
+                </figure>
+              ))}
+            </div>
+          </Panel>
           <div className={`${styles["history-grid"]}`}>
             <Panel title="Attendance & payable">
               <div
@@ -334,47 +577,6 @@ function WorkerHistory({ worker, onClose }) {
               </div>
             </Panel>
             <Panel
-              title="Work assignments"
-              detail="Sites and work periods linked to this worker."
-            >
-              <div className={`${styles["table-wrap"]}`}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Site / client</th>
-                      <th>Work</th>
-                      <th>Start</th>
-                      <th>Days</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.assignments?.map((item) => (
-                      <tr key={item._id}>
-                        <td>
-                          <strong>{item.siteName}</strong>
-                          <small>{item.client?.name || "—"}</small>
-                        </td>
-                        <td>{item.workDescription}</td>
-                        <td>{date(item.startDate)}</td>
-                        <td>{item.workDays || 0}</td>
-                        <td>
-                          <Status
-                            tone={item.status === "ACTIVE" ? "teal" : "neutral"}
-                          >
-                            {item.status}
-                          </Status>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!data.assignments?.length && (
-                  <Empty title="No work assignments" />
-                )}
-              </div>
-            </Panel>
-            <Panel
               title="Daily work and attendance"
               detail="Every marked day, 2P day and overtime amount."
             >
@@ -383,7 +585,6 @@ function WorkerHistory({ worker, onClose }) {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Site / work</th>
                       <th>Status</th>
                       <th>Units</th>
                       <th>OT</th>
@@ -394,13 +595,6 @@ function WorkerHistory({ worker, onClose }) {
                     {data.attendance?.map((item) => (
                       <tr key={item._id}>
                         <td>{date(item.date)}</td>
-                        <td>
-                          {item.assignment?.siteName || "—"}
-                          <small>
-                            {item.assignment?.workDescription ||
-                              "Attendance record"}
-                          </small>
-                        </td>
                         <td>
                           <Status
                             tone={
@@ -438,7 +632,6 @@ function WorkerHistory({ worker, onClose }) {
                     <tr>
                       <th>Date</th>
                       <th>Type</th>
-                      <th>Work record</th>
                       <th>Amount</th>
                     </tr>
                   </thead>
@@ -453,7 +646,6 @@ function WorkerHistory({ worker, onClose }) {
                             {item.kind.replace("_", " ")}
                           </Status>
                         </td>
-                        <td>{item.assignment?.siteName || "—"}</td>
                         <td className={`${styles["amount"]}`}>
                           {money(item.amount)}
                         </td>
@@ -471,10 +663,9 @@ function WorkerHistory({ worker, onClose }) {
   );
 }
 
-export function WorkersPage() {
-  const [params, setParams] = useSearchParams();
+export function WorkersPage({ businessType = "LABOUR" }) {
   const navigate = useNavigate();
-  const type = params.get("type") === "PAINTER" ? "PAINTER" : "LABOUR";
+  const type = businessType;
   const [workers, setWorkers] = useState([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(false);
@@ -482,6 +673,7 @@ export function WorkersPage() {
   const [deleting, setDeleting] = useState();
   const [history, setHistory] = useState();
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
   const load = () =>
     request(api.get("/workers", { params: { type, search } }))
       .then(({ workers: result }) => setWorkers(result))
@@ -499,38 +691,100 @@ export function WorkersPage() {
         : [worker, ...current],
     );
   };
+  const getExportWorkers = async () => {
+    const result = await request(api.get("/workers", { params: { type } }));
+    return result.workers || [];
+  };
+  const exportExcel = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const records = await getExportWorkers();
+      const csv = [
+        exportColumns.map(([label]) => csvCell(label)).join(","),
+        ...records.map((worker) =>
+          exportColumns
+            .map(([, key]) => csvCell(exportValue(worker, key)))
+            .join(","),
+        ),
+      ].join("\r\n");
+      const blob = new Blob([`\uFEFF${csv}`], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${type.toLowerCase()}-workforce.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const exportPdf = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      printWorkers(await getExportWorkers(), type);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  };
   return (
     <>
       <PageHeader
-        eyebrow="WORKFORCE"
-        title={`${typeTitle(type)} management`}
-        detail={`Maintain complete ${type.toLowerCase()} profiles, rates and history.`}
-        action={
-          <AddButton
-            className={`${styles["button-primary"]}`}
-            onClick={() => setForm(true)}
-          >
-            Add {typeTitle(type)}
-          </AddButton>
+        eyebrow={type === "PAINTER" ? "PAINTER TEAM" : "LABOUR TEAM"}
+        title={
+          type === "PAINTER"
+            ? "Painter workforce management"
+            : "Labour workforce management"
         }
-      />
-      <SectionTabs
-        value={type}
-        showAttendance
-        onChange={(value) => {
-          if (value === "ATTENDANCE") {
-            navigate("/attendance");
-            return;
-          }
-          setParams({ type: value });
-        }}
+        detail={
+          type === "PAINTER"
+            ? "Maintain complete painter profiles, daily rates and work history separately from labour."
+            : "Maintain complete labour profiles, daily rates and work history separately from painters."
+        }
+        action={
+          <div className={`${styles["actions-inline"]}`}>
+            <Button
+              icon={Download}
+              className={`${styles["button-secondary"]}`}
+              onClick={exportExcel}
+              loading={exporting}
+            >
+              Excel
+            </Button>
+            <Button
+              icon={Printer}
+              className={`${styles["button-secondary"]}`}
+              onClick={exportPdf}
+              disabled={exporting}
+            >
+              PDF
+            </Button>
+            <AddButton
+              className={`${styles["button-primary"]}`}
+              onClick={() => setForm(true)}
+            >
+              Add {typeTitle(type)}
+            </AddButton>
+          </div>
+        }
       />
       <Panel
         action={
           <SearchBox
             value={search}
             onChange={setSearch}
-            placeholder={`Search ${type.toLowerCase()} by name…`}
+            placeholder={
+              type === "LABOUR"
+                ? "Search labour by name, team or work zone…"
+                : "Search painter by name or work zone…"
+            }
           />
         }
       >
@@ -540,6 +794,7 @@ export function WorkersPage() {
             <thead>
               <tr>
                 <th>{typeTitle(type)}</th>
+                {type === "LABOUR" && <th>Team</th>}
                 <th>Photo</th>
                 <th>Contact</th>
                 <th>Skill</th>
@@ -554,15 +809,23 @@ export function WorkersPage() {
             </thead>
             <tbody>
               {workers.map((worker) => (
-                <tr key={worker._id}>
+                <tr
+                  key={worker._id}
+                  className={
+                    worker.active
+                      ? styles["worker-active"]
+                      : styles["worker-inactive"]
+                  }
+                >
                   <td>
                     <strong>{worker.name}</strong>
                     <small>Joined {date(worker.joiningDate)}</small>
                   </td>
+                  {type === "LABOUR" && <td>{worker.teamName || "—"}</td>}
                   <td>
                     {worker.photoPath ? (
                       <img
-                        src={`${import.meta.env.VITE_API_URL?.replace(/\/api$/, "") || "http://localhost:5000"}${worker.photoPath}`}
+                        src={imageUrl(worker, "photoUrl", "photoPath")}
                         alt={`${worker.name} profile`}
                         width="42"
                         height="42"
@@ -628,7 +891,7 @@ export function WorkersPage() {
               ))}
               {!workers.length && (
                 <tr>
-                  <td colSpan="11">
+                  <td colSpan={type === "LABOUR" ? 12 : 11}>
                     <Empty
                       title={`No ${type.toLowerCase()} records`}
                       detail={`Add your first ${type.toLowerCase()} to get started.`}

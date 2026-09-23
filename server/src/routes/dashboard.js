@@ -14,46 +14,60 @@ const moneyBy = (items, predicate) =>
 
 router.get(
   "/summary",
-  asyncHandler(async (_req, res) => {
-    const [
-      labourCount,
-      painterCount,
-      assignments,
-      payments,
-      latestPayments,
-      payableByType,
-    ] = await Promise.all([
-      Worker.countDocuments({ type: "LABOUR", active: true }),
-      Worker.countDocuments({ type: "PAINTER", active: true }),
-      Assignment.find({ status: { $ne: "CANCELLED" } })
-        .populate("worker", "name type")
-        .populate("client", "name")
-        .sort({ startDate: -1 }),
-      Payment.find().lean(),
-      Payment.find()
-        .populate("worker", "name type")
-        .populate("client", "name")
-        .populate("assignment", "siteName type")
-        .sort({ paidOn: -1, createdAt: -1 })
-        .limit(8),
-      Attendance.aggregate([
-        {
-          $lookup: {
-            from: "workers",
-            localField: "worker",
-            foreignField: "_id",
-            as: "worker",
-          },
+  asyncHandler(async (req, res) => {
+    const type = "LABOUR";
+    const workerFilter = type ? { type } : {};
+    const workers = await Worker.find(workerFilter).select("_id");
+    const workerIds = workers.map((worker) => worker._id);
+    const assignmentRows = await Assignment.find(type ? { type } : {}).select(
+      "_id",
+    );
+    const assignmentIds = assignmentRows.map((assignment) => assignment._id);
+    const paymentScope = type
+      ? {
+          $or: [
+            { worker: { $in: workerIds } },
+            { assignment: { $in: assignmentIds } },
+          ],
+        }
+      : {};
+    const attendancePipeline = [
+      {
+        $lookup: {
+          from: "workers",
+          localField: "worker",
+          foreignField: "_id",
+          as: "worker",
         },
-        { $unwind: "$worker" },
-        {
-          $group: {
-            _id: "$worker.type",
-            total: { $sum: "$payableAmount" },
-          },
+      },
+      { $unwind: "$worker" },
+      ...(type ? [{ $match: { "worker.type": type } }] : []),
+      {
+        $group: {
+          _id: "$worker.type",
+          total: { $sum: "$payableAmount" },
         },
-      ]),
-    ]);
+      },
+    ];
+    const [labourCount, assignments, payments, latestPayments, payableByType] =
+      await Promise.all([
+        Worker.countDocuments({ ...workerFilter, active: true }),
+        Assignment.find({
+          status: { $ne: "CANCELLED" },
+          ...(type ? { type } : {}),
+        })
+          .populate("worker", "name type")
+          .populate("client", "name")
+          .sort({ startDate: -1 }),
+        Payment.find(paymentScope).lean(),
+        Payment.find(paymentScope)
+          .populate("worker", "name type")
+          .populate("client", "name")
+          .populate("assignment", "siteName type")
+          .sort({ paidOn: -1, createdAt: -1 })
+          .limit(8),
+        Attendance.aggregate(attendancePipeline),
+      ]);
 
     const payoutTotal = assignments.reduce(
       (sum, item) => sum + Number(item.payoutAmount || 0),
@@ -84,7 +98,7 @@ router.get(
       .map((assignment) => ({
         id: assignment.id,
         type: assignment.type,
-        worker: assignment.worker?.name,
+        worker: assignment.client?.name,
         siteName: assignment.siteName,
         status: assignment.status,
         payableDue: Math.max(
@@ -99,9 +113,7 @@ router.get(
     res.json({
       summary: {
         activeLabour: labourCount,
-        activePainters: painterCount,
         labourPayable: payableByWorkerType.LABOUR || 0,
-        painterPayable: payableByWorkerType.PAINTER || 0,
         activeAssignments: assignments.filter(
           (item) => item.status === "ACTIVE",
         ).length,

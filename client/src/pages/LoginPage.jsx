@@ -12,7 +12,10 @@ export function LoginPage({ onAuthenticated }) {
   useEffect(() => {
     request(api.get("/auth/setup-status"))
       .then(({ needsSetup: value }) => setNeedsSetup(value))
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        setNeedsSetup(false);
+        setError(err.message);
+      });
   }, []);
   const submit = async (event) => {
     event.preventDefault();
@@ -45,11 +48,11 @@ export function LoginPage({ onAuthenticated }) {
           <em>Calmer days.</em>
         </h1>
         <p>
-          One secure workspace for labour supply, painter supply, payments,
-          bills and daily business decisions.
+          One secure workspace for labour supply, payments, bills and daily
+          business decisions.
         </p>
         <div className={`${styles["login-points"]}`}>
-          <span>✓ Labour & painter records</span>
+          <span>✓ Labour records</span>
           <span>✓ Advance and due tracking</span>
           <span>✓ Bills ready to print or save as PDF</span>
         </div>

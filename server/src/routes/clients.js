@@ -9,6 +9,7 @@ import { pick } from "../utils/serializers.js";
 const router = Router();
 const editable = [
   "name",
+  "businessType",
   "contactPerson",
   "phone",
   "identityType",
@@ -26,6 +27,7 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const filter = {};
+    filter.businessType = "LABOUR";
     if (req.query.active !== undefined)
       filter.active = req.query.active === "true";
     if (req.query.search) filter.name = new RegExp(req.query.search, "i");
@@ -38,17 +40,8 @@ router.post(
   allowRoles("OWNER", "ADMIN"),
   asyncHandler(async (req, res) => {
     const data = pick(req.body, editable);
-    if (
-      !data.name ||
-      !data.phone ||
-      !data.identityType ||
-      !data.identityNumber
-    ) {
-      throw new ApiError(
-        400,
-        "Client name, phone and Aadhaar/PAN details are required.",
-      );
-    }
+    data.businessType = "LABOUR";
+    if (!data.name) throw new ApiError(400, "Client name is required.");
     const client = await Client.create(data);
     res.status(201).json({ client });
   }),
@@ -61,17 +54,8 @@ router.patch(
     const existing = await Client.findById(req.params.id);
     if (!existing) throw new ApiError(404, "Client not found.");
     const next = { ...existing.toObject(), ...pick(req.body, editable) };
-    if (
-      !next.name ||
-      !next.phone ||
-      !next.identityType ||
-      !next.identityNumber
-    ) {
-      throw new ApiError(
-        400,
-        "Client name, phone and Aadhaar/PAN details are required.",
-      );
-    }
+    next.businessType = "LABOUR";
+    if (!next.name) throw new ApiError(400, "Client name is required.");
     const client = await Client.findByIdAndUpdate(
       req.params.id,
       pick(req.body, editable),

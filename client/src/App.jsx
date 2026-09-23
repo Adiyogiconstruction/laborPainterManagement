@@ -5,25 +5,33 @@ import { LoadingPage } from "./components/ui/index.jsx";
 import { AppShell } from "./layout/AppShell.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 
+const isValidSession = (session) =>
+  Boolean(session?.user?.name && session?.user?.role);
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
   useEffect(() => {
-    const token = localStorage.getItem("workledger_token");
-    if (!token) return setChecking(false);
     request(api.get("/auth/me"))
-      .then(({ user }) => setSession({ token, user }))
-      .catch(() => localStorage.removeItem("workledger_token"))
+      .then(({ user }) => {
+        const nextSession = { user };
+        if (!isValidSession(nextSession)) throw new Error("Invalid session");
+        setSession(nextSession);
+      })
+      .catch(() => {
+        setSession(null);
+      })
       .finally(() => setChecking(false));
   }, []);
-  const authenticated = ({ token, user }) => {
-    localStorage.setItem("workledger_token", token);
-    setSession({ token, user });
+  const authenticated = (data) => {
+    if (!isValidSession(data)) throw new Error("Invalid login response.");
+    const { user } = data;
+    setSession({ user });
     navigate("/");
   };
-  const logout = () => {
-    localStorage.removeItem("workledger_token");
+  const logout = async () => {
+    await request(api.post("/auth/logout"));
     setSession(null);
     navigate("/");
   };

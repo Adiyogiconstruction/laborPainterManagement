@@ -32,7 +32,7 @@ export function Panel({ title, detail, action, children, className = "" }) {
   );
 }
 
-export function Modal({ title, children, onClose, wide = false }) {
+export function Modal({ title, children, onClose, wide = false, action }) {
   return (
     <div
       className={`${styles["modal-backdrop"]}`}
@@ -46,7 +46,10 @@ export function Modal({ title, children, onClose, wide = false }) {
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className={`${styles["modal-head"]}`}>
-          <h2>{title}</h2>
+          <div className={`${styles["modal-title-row"]}`}>
+            <h2>{title}</h2>
+            {action}
+          </div>
           <button
             className={`${styles["icon-button"]}`}
             onClick={onClose}

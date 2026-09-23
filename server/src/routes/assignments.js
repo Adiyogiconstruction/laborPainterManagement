@@ -1,6 +1,6 @@
 import { Router } from "express";
 import Assignment from "../models/Assignment.js";
-import Worker from "../models/Worker.js";
+import Client from "../models/Client.js";
 import Payment from "../models/Payment.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
@@ -31,7 +31,7 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const filter = {};
-    if (req.query.type) filter.type = req.query.type;
+    filter.type = "LABOUR";
     if (req.query.status) filter.status = req.query.status;
     if (req.query.worker) {
       filter.$or = [
@@ -43,10 +43,7 @@ router.get(
     const range = dateRange(req.query);
     if (range) filter.startDate = range;
     if (req.query.search)
-      filter.$or = [
-        { siteName: new RegExp(req.query.search, "i") },
-        { workDescription: new RegExp(req.query.search, "i") },
-      ];
+      filter.$or = [{ siteName: new RegExp(req.query.search, "i") }];
     const assignments = await Assignment.find(filter)
       .populate("worker", "name type phone")
       .populate("workers", "name type phone")
@@ -60,40 +57,27 @@ router.post(
   "/",
   allowRoles("OWNER", "ADMIN"),
   asyncHandler(async (req, res) => {
-    const data = pick(req.body, editable);
+    const data = { ...pick(req.body, editable), type: "LABOUR" };
     if (
       !data.client ||
       !data.type ||
       !data.siteName ||
-      !data.workDescription ||
       !data.startDate ||
       data.clientRate === undefined ||
-      data.clientRate === null ||
-      data.workerRate === undefined ||
-      data.workerRate === null
+      data.clientRate === null
     ) {
       throw new ApiError(
         400,
-        "Type, client, site, work description, start date and both rates are required.",
+        "Type, client, site, start date and client rate are required.",
       );
     }
-    const selectedWorkers = data.workers?.length
-      ? data.workers
-      : data.worker
-        ? [data.worker]
-        : [];
-    if (!selectedWorkers.length)
-      throw new ApiError(400, "At least one worker is required.");
-    const workers = await Worker.find({ _id: { $in: selectedWorkers } });
-    if (workers.length !== selectedWorkers.length)
-      throw new ApiError(404, "Worker not found.");
-    if (workers.some((worker) => worker.type !== data.type))
-      throw new ApiError(
-        400,
-        "Selected workers must match the assignment type.",
-      );
-    data.workers = selectedWorkers;
-    data.worker = selectedWorkers[0];
+    const client = await Client.findOne({
+      _id: data.client,
+      businessType: data.type,
+      "sites.name": data.siteName,
+    });
+    if (!client)
+      throw new ApiError(400, "Select a site registered for this client.");
     const assignment = await Assignment.create({
       ...data,
       createdBy: req.user.id,
@@ -113,43 +97,32 @@ router.patch(
   asyncHandler(async (req, res) => {
     const assignment = await Assignment.findById(req.params.id);
     if (!assignment) throw new ApiError(404, "Work record not found.");
-    const next = { ...assignment.toObject(), ...pick(req.body, editable) };
+    const next = {
+      ...assignment.toObject(),
+      ...pick(req.body, editable),
+      type: "LABOUR",
+    };
     if (
       !next.client ||
       !next.type ||
       !next.siteName ||
-      !next.workDescription ||
       !next.startDate ||
       next.clientRate === undefined ||
-      next.clientRate === null ||
-      next.workerRate === undefined ||
-      next.workerRate === null
+      next.clientRate === null
     ) {
       throw new ApiError(
         400,
-        "Type, client, site, work description, start date and both rates are required.",
+        "Type, client, site, start date and client rate are required.",
       );
     }
-    const nextWorkers = req.body.workers?.length
-      ? req.body.workers
-      : req.body.worker
-        ? [req.body.worker]
-        : assignment.workers?.length
-          ? assignment.workers
-          : assignment.worker
-            ? [assignment.worker]
-            : [];
-    const workers = await Worker.find({ _id: { $in: nextWorkers } });
-    if (!nextWorkers.length || workers.length !== nextWorkers.length)
-      throw new ApiError(400, "At least one valid worker is required.");
-    if (workers.some((worker) => worker.type !== next.type))
-      throw new ApiError(
-        400,
-        "Selected workers must match the assignment type.",
-      );
+    const client = await Client.findOne({
+      _id: next.client,
+      businessType: next.type,
+      "sites.name": next.siteName,
+    });
+    if (!client)
+      throw new ApiError(400, "Select a site registered for this client.");
     Object.assign(assignment, pick(req.body, editable));
-    assignment.workers = nextWorkers;
-    assignment.worker = nextWorkers[0];
     await assignment.save();
     await assignment.populate([
       { path: "worker", select: "name type phone" },

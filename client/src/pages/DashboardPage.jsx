@@ -40,17 +40,41 @@ import {
   typeTitle,
 } from "./shared.jsx";
 
-export function DashboardPage() {
+export function DashboardPage({ businessType = "LABOUR" }) {
+  const workspace = businessType.toLowerCase();
   const navigate = useNavigate();
   const [data, setData] = useState();
+  const [painterData, setPainterData] = useState({
+    workers: [],
+    paintTransactions: [],
+    paintBalances: [],
+    payments: [],
+  });
   const [error, setError] = useState("");
   const load = () =>
-    request(api.get("/dashboard/summary"))
+    request(api.get("/dashboard/summary", { params: { type: businessType } }))
       .then(setData)
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
     load();
-  }, []);
+  }, [businessType]);
+  useEffect(() => {
+    if (businessType !== "PAINTER") return;
+    Promise.all([
+      request(api.get("/workers", { params: { type: businessType } })),
+      request(api.get("/paint")),
+      request(api.get("/payments", { params: { type: businessType } })),
+    ])
+      .then(([workersResult, paintResult, paymentsResult]) => {
+        setPainterData({
+          workers: workersResult.workers || [],
+          paintTransactions: paintResult.transactions || [],
+          paintBalances: paintResult.balances || [],
+          payments: paymentsResult.payments || [],
+        });
+      })
+      .catch((err) => setError(errorMessage(err)));
+  }, [businessType]);
   if (!data)
     return (
       <>
@@ -69,20 +93,64 @@ export function DashboardPage() {
       </>
     );
   const { summary, latestPayments, outstanding } = data;
+  const workspaceLabel = businessType === "PAINTER" ? "Painter" : "Labour";
+  const activePeople =
+    businessType === "PAINTER" ? summary.activePainters : summary.activeLabour;
+  const payable =
+    businessType === "PAINTER" ? summary.painterPayable : summary.labourPayable;
+  const painterSummary =
+    businessType === "PAINTER"
+      ? painterData.workers.reduce(
+          (accumulator, worker) => {
+            accumulator.active += worker.active ? 1 : 0;
+            accumulator.totalDue += Number(worker.totalDue || 0);
+            return accumulator;
+          },
+          { active: 0, totalDue: 0 },
+        )
+      : null;
+  const paintSummary =
+    businessType === "PAINTER"
+      ? painterData.paintTransactions.reduce(
+          (accumulator, item) => {
+            const quantity = Number(item.quantity || 0);
+            if (item.kind === "ISSUED") accumulator.issued += quantity;
+            if (item.kind === "PURCHASED") accumulator.purchased += quantity;
+            if (item.kind === "USED") accumulator.used += quantity;
+            if (item.kind === "RETURNED") accumulator.returned += quantity;
+            return accumulator;
+          },
+          { issued: 0, purchased: 0, used: 0, returned: 0 },
+        )
+      : null;
+  const painterPaymentTotal =
+    businessType === "PAINTER"
+      ? painterData.payments.reduce(
+          (total, payment) => total + Number(payment.amount || 0),
+          0,
+        )
+      : 0;
+  const painterBalance =
+    businessType === "PAINTER"
+      ? painterData.paintBalances.reduce(
+          (total, item) => total + Number(item.balance || 0),
+          0,
+        )
+      : 0;
   return (
     <>
       <PageHeader
-        eyebrow="BUSINESS OVERVIEW"
-        title="Your operations, at a glance"
-        detail="Live totals from every labour and painter work record."
+        title="Overview"
         action={
           <div className={`${styles["dashboard-header-actions"]}`}>
             <Button
               icon={BriefcaseBusiness}
               className={`${styles["button-primary"]}`}
-              onClick={() => navigate("/work")}
+              onClick={() => navigate(`/${workspace}/work`)}
             >
-              New work supply
+              {businessType === "PAINTER"
+                ? "New painter work supply"
+                : "New labour work supply"}
             </Button>
             <Button
               icon={RefreshCcw}
@@ -99,55 +167,159 @@ export function DashboardPage() {
         className={`${styles["metric-grid"]} ${styles["dashboard-metrics"]}`}
       >
         <Metric
-          label="Worker dues"
+          label={`${workspaceLabel} dues`}
           value={money(summary.dueToWorkers)}
           detail={`${money(summary.workerPaid)} paid out`}
           tone="coral"
           icon={ArrowUpRight}
         />
         <Metric
-          label="Labour working"
-          value={number(summary.activeLabour)}
-          detail={`${money(summary.labourPayable)} payable · ${number(summary.activeAssignments)} active work records`}
+          label={`${workspaceLabel} working`}
+          value={number(activePeople)}
+          detail={`${money(payable)} payable · ${number(summary.activeAssignments)} active work records`}
           icon={UsersRound}
-        />
-        <Metric
-          label="Painters active"
-          value={number(summary.activePainters)}
-          detail={`${money(summary.painterPayable)} payable · Available in your workforce`}
-          tone="purple"
-          icon={BriefcaseBusiness}
         />
       </div>
       <div className={`${styles["quick-actions"]}`}>
         <button
           className={`${styles["quick-primary"]}`}
-          onClick={() => navigate("/work")}
+          onClick={() => navigate(`/${workspace}/work`)}
         >
           {" "}
           <BriefcaseBusiness size={18} />
           <span>
-            <strong>New work supply</strong>
-            <small>Assign labour or painter to a client</small>
+            <strong>
+              {businessType === "PAINTER"
+                ? "New painter work supply"
+                : "New labour work supply"}
+            </strong>
+            <small>Assign work to a client site</small>
           </span>
         </button>
-        <button onClick={() => navigate("/payments")}>
+        <button onClick={() => navigate(`/${workspace}/payments`)}>
           {" "}
           <Banknote size={18} />
           <span>
-            <strong>Record payment</strong>
+            <strong>
+              {businessType === "PAINTER"
+                ? "Record painter payment"
+                : "Record labour payment"}
+            </strong>
             <small>Add advance, wage or client receipt</small>
           </span>
         </button>
       </div>
+      {businessType === "PAINTER" && (
+        <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
+          <Panel
+            title="Painter-wise summary"
+            detail="Live painter count, cash issued, and remaining paint in circulation."
+          >
+            <div className={`${styles["money-list"]}`}>
+              <div>
+                <span>Active painters</span>
+                <strong>{number(painterSummary?.active || 0)}</strong>
+              </div>
+              <div>
+                <span>Cash issued</span>
+                <strong>{money(painterPaymentTotal)}</strong>
+              </div>
+              <div>
+                <span>Paint issued</span>
+                <strong>{number(paintSummary?.issued || 0)} L</strong>
+              </div>
+              <div>
+                <span>Paint used</span>
+                <strong>{number(paintSummary?.used || 0)} L</strong>
+              </div>
+              <div>
+                <span>Current paint balance</span>
+                <strong>{number(painterBalance)} L</strong>
+              </div>
+              <div>
+                <span>Outstanding due</span>
+                <strong>{money(painterSummary?.totalDue || 0)}</strong>
+              </div>
+            </div>
+          </Panel>
+          <Panel
+            title="Painter ledger"
+            detail="Quick view of each painter’s outstanding amount and paint availability."
+          >
+            <div className={`${styles["table-wrap"]}`}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Painter</th>
+                    <th>Skill</th>
+                    <th>Due</th>
+                    <th>Paint balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {painterData.workers.length ? (
+                    painterData.workers.map((worker) => {
+                      const workerPaintBalance = painterData.paintTransactions
+                        .filter((item) => item.worker?._id === worker._id)
+                        .reduce((total, item) => {
+                          const quantity = Number(item.quantity || 0);
+                          if (item.kind === "ISSUED") total += quantity;
+                          if (item.kind === "USED") total -= quantity;
+                          if (item.kind === "RETURNED") total += quantity;
+                          return total;
+                        }, 0);
+                      return (
+                        <tr key={worker._id}>
+                          <td>
+                            <strong>{worker.name}</strong>
+                            <small>
+                              {worker.active ? "Active" : "Inactive"}
+                            </small>
+                          </td>
+                          <td>{worker.skill || "Painter"}</td>
+                          <td className={`${styles["amount"]}`}>
+                            {money(worker.totalDue || 0)}
+                          </td>
+                          <td>{number(Math.max(workerPaintBalance, 0))} L</td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="4">
+                        <Empty
+                          title="No painter ledger yet"
+                          detail="Add workers to start painter tracking."
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      )}
       <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
         <Panel
-          title="Money snapshot"
-          detail="All amounts are calculated from your saved work and payment records."
+          title={
+            businessType === "PAINTER"
+              ? "Painter money snapshot"
+              : "Labour money snapshot"
+          }
+          detail={
+            businessType === "PAINTER"
+              ? "All painter amounts are calculated from saved painting work, paint movement and payment records."
+              : "All labour amounts are calculated from saved worker work, advance and payment records."
+          }
         >
           <div className={`${styles["money-list"]}`}>
             <div>
-              <span>Total worker cost</span>
+              <span>
+                {businessType === "PAINTER"
+                  ? "Total painter cost"
+                  : "Total labour cost"}
+              </span>
               <strong>{money(summary.totalWorkerCost)}</strong>
             </div>
             <div>
@@ -155,22 +327,42 @@ export function DashboardPage() {
               <strong>{money(summary.totalExpense)}</strong>
             </div>
             <div>
-              <span>Advance with workers</span>
+              <span>
+                {businessType === "PAINTER"
+                  ? "Advance with painters"
+                  : "Advance with workers"}
+              </span>
               <strong>{money(summary.advances)}</strong>
             </div>
           </div>
         </Panel>
         <Panel
-          title="Workforce payout summary"
-          detail="Track what has been paid to labour and painters."
+          title={
+            businessType === "PAINTER"
+              ? "Painter payout summary"
+              : "Labour payout summary"
+          }
+          detail={
+            businessType === "PAINTER"
+              ? "Track what has been paid to painters and their outstanding dues."
+              : "Track what has been paid to labour workers and their outstanding dues."
+          }
         >
           <div className={`${styles["money-list"]}`}>
             <div>
-              <span>Paid to workers</span>
+              <span>
+                {businessType === "PAINTER"
+                  ? "Paid to painters"
+                  : "Paid to workers"}
+              </span>
               <strong>{money(summary.workerPaid)}</strong>
             </div>
             <div>
-              <span>Due to workers</span>
+              <span>
+                {businessType === "PAINTER"
+                  ? "Due to painters"
+                  : "Due to workers"}
+              </span>
               <strong>{money(summary.dueToWorkers)}</strong>
             </div>
             <div>
@@ -186,12 +378,20 @@ export function DashboardPage() {
       </div>
       <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
         <Panel
-          title="Outstanding work records"
-          detail="Work that still has money due from the client or payable to the worker."
+          title={
+            businessType === "PAINTER"
+              ? "Outstanding painter work records"
+              : "Outstanding labour work records"
+          }
+          detail={
+            businessType === "PAINTER"
+              ? "Painting work that still has money due from the client or payable to the painter."
+              : "Labour work that still has money due from the client or payable to the worker."
+          }
           action={
             <button
               className={`${styles["text-button"]}`}
-              onClick={() => navigate("/work")}
+              onClick={() => navigate(`/${workspace}/work`)}
             >
               Work supply
             </button>
@@ -244,7 +444,7 @@ export function DashboardPage() {
           action={
             <button
               className={`${styles["text-button"]}`}
-              onClick={() => navigate("/payments")}
+              onClick={() => navigate(`/${workspace}/payments`)}
             >
               All payments
             </button>

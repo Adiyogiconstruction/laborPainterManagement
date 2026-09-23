@@ -4,11 +4,12 @@ const workerSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["LABOUR", "PAINTER"],
+      enum: ["LABOUR"],
       required: true,
       index: true,
     },
     name: { type: String, required: true, trim: true, maxlength: 100 },
+    teamName: { type: String, trim: true, maxlength: 100, default: "" },
     phone: { type: String, required: true, trim: true, maxlength: 25 },
     aadhaarNumber: {
       type: String,
@@ -20,6 +21,14 @@ const workerSchema = new mongoose.Schema(
     skill: { type: String, required: true, trim: true, maxlength: 100 },
     workZone: { type: String, trim: true, maxlength: 100, default: "" },
     photoPath: { type: String, trim: true, default: "" },
+    photoUrl: { type: String, trim: true, default: "" },
+    photoPublicId: { type: String, trim: true, default: "" },
+    aadhaarFrontPath: { type: String, trim: true, default: "" },
+    aadhaarBackPath: { type: String, trim: true, default: "" },
+    aadhaarFrontUrl: { type: String, trim: true, default: "" },
+    aadhaarBackUrl: { type: String, trim: true, default: "" },
+    aadhaarFrontPublicId: { type: String, trim: true, default: "" },
+    aadhaarBackPublicId: { type: String, trim: true, default: "" },
     ppeKitIssuedOn: { type: Date, default: null },
     defaultDailyRate: { type: Number, required: true, min: 0 },
     overtimeHourlyRate: { type: Number, min: 0, default: 0 },

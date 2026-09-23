@@ -2,6 +2,7 @@ import { Router } from "express";
 import Assignment from "../models/Assignment.js";
 import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
+import Worker from "../models/Worker.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { dateRange } from "../utils/serializers.js";
 
@@ -12,7 +13,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const assignmentFilter = {};
     const paymentFilter = {};
-    if (req.query.type) assignmentFilter.type = req.query.type;
+    assignmentFilter.type = "LABOUR";
     if (req.query.status) assignmentFilter.status = req.query.status;
     if (req.query.worker) assignmentFilter.worker = req.query.worker;
     if (req.query.client) assignmentFilter.client = req.query.client;
@@ -67,9 +68,7 @@ router.get(
 router.get(
   "/attendance",
   asyncHandler(async (req, res) => {
-    const type = ["LABOUR", "PAINTER"].includes(req.query.type)
-      ? req.query.type
-      : "ALL";
+    const type = "LABOUR";
     const from =
       req.query.from ||
       new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -80,15 +79,21 @@ router.get(
       new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
         .toISOString()
         .slice(0, 10);
-    const attendance = await Attendance.find({
-      ...(type === "ALL" ? {} : { type }),
-      date: {
-        $gte: new Date(`${from}T00:00:00.000Z`),
-        $lte: new Date(`${to}T23:59:59.999Z`),
-      },
-    })
-      .populate("worker", "name type")
-      .populate("assignment", "siteName workDescription");
+    const workerFilter = { active: true, type };
+    if (req.query.worker) workerFilter._id = req.query.worker;
+    const [workers, attendance] = await Promise.all([
+      Worker.find(workerFilter).sort({ name: 1 }),
+      Attendance.find({
+        ...(type === "ALL" ? {} : { type }),
+        ...(req.query.worker ? { worker: req.query.worker } : {}),
+        date: {
+          $gte: new Date(`${from}T00:00:00.000Z`),
+          $lte: new Date(`${to}T23:59:59.999Z`),
+        },
+      })
+        .populate("worker", "name type")
+        .populate("assignment", "siteName workDescription"),
+    ]);
 
     const rows = attendance.map((item) => ({
       id: item._id,
@@ -100,6 +105,54 @@ router.get(
       workUnits: item.workUnits,
       payableAmount: item.payableAmount,
     }));
+
+    const attendanceByWorkerDate = new Map(
+      attendance.map((item) => [
+        `${String(item.worker?._id || item.worker)}:${item.date.toISOString().slice(0, 10)}`,
+        item,
+      ]),
+    );
+    const startDate = new Date(`${from}T00:00:00.000Z`);
+    const endDate = new Date(`${to}T00:00:00.000Z`);
+    const workerSummaries = workers.map((worker) => {
+      const records = [];
+      const counts = {
+        PRESENT: 0,
+        DOUBLE_PRESENT: 0,
+        ABSENT: 0,
+        HALF_DAY: 0,
+        LEAVE: 0,
+        NOT_MARKED: 0,
+      };
+      for (
+        const current = new Date(startDate);
+        current <= endDate;
+        current.setUTCDate(current.getUTCDate() + 1)
+      ) {
+        const dateKey = current.toISOString().slice(0, 10);
+        const item = attendanceByWorkerDate.get(`${worker._id}:${dateKey}`);
+        const status = item?.status || "NOT_MARKED";
+        counts[status] += 1;
+        records.push({
+          date: dateKey,
+          status,
+          workUnits: item?.workUnits || 0,
+          payableAmount: item?.payableAmount || 0,
+        });
+      }
+      return {
+        workerId: worker._id,
+        workerName: worker.name,
+        type: worker.type,
+        ...counts,
+        totalDays: records.length,
+        payable: records.reduce(
+          (total, record) => total + Number(record.payableAmount || 0),
+          0,
+        ),
+        records,
+      };
+    });
 
     const summary = rows.reduce(
       (accumulator, item) => {
@@ -117,7 +170,7 @@ router.get(
       },
     );
 
-    res.json({ rows, summary });
+    res.json({ rows, summary, workerSummaries, from, to });
   }),
 );
 

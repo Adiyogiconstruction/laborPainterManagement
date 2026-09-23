@@ -4,7 +4,7 @@ const attendanceSheetSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["ALL", "LABOUR", "PAINTER"],
+      enum: ["ALL", "LABOUR"],
       required: true,
       index: true,
     },

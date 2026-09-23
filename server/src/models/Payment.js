@@ -58,7 +58,7 @@ paymentSchema.pre("validate", function validateCounterparty(next) {
   if (this.flow === "INFLOW" && !this.client)
     return next(new Error("Client is required for money received."));
   if (this.flow === "OUTFLOW" && this.kind !== "EXPENSE" && !this.worker) {
-    return next(new Error("Worker is required for wages or advances."));
+    return next(new Error("Worker is required for this payment."));
   }
   if (this.kind === "OTHER" && !String(this.notes || "").trim()) {
     return next(new Error("Please specify the other payment type in notes."));

@@ -4,7 +4,7 @@ const assignmentSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["LABOUR", "PAINTER"],
+      enum: ["LABOUR"],
       required: true,
       index: true,
     },
@@ -30,7 +30,6 @@ const assignmentSchema = new mongoose.Schema(
     siteName: { type: String, required: true, trim: true, maxlength: 150 },
     workDescription: {
       type: String,
-      required: true,
       trim: true,
       maxlength: 500,
     },

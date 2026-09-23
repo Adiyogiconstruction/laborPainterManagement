@@ -7,6 +7,7 @@ import {
   Coffee,
   Copy,
   Lock,
+  Save,
   XCircle,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
@@ -31,10 +32,274 @@ const statusMeta = {
 };
 
 const defaultDate = () => new Date().toISOString().slice(0, 10);
+const defaultMonth = () => defaultDate().slice(0, 7);
+const monthlyStatusOrder = [
+  "NOT_MARKED",
+  "PRESENT",
+  "ABSENT",
+  "HALF_DAY",
+  "LEAVE",
+  "DOUBLE_PRESENT",
+];
 
-export function AttendancePage() {
+function MonthlyAttendance({ businessType, onBack }) {
+  const [month, setMonth] = useState(defaultMonth());
+  const [data, setData] = useState({ workers: [], days: 0, attendance: [] });
+  const [cells, setCells] = useState({});
+  const [periodWorker, setPeriodWorker] = useState("");
+  const [periodStart, setPeriodStart] = useState(`${defaultMonth()}-01`);
+  const [periodEnd, setPeriodEnd] = useState(`${defaultMonth()}-01`);
+  const [periodStatus, setPeriodStatus] = useState("PRESENT");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await request(
+        api.get("/attendance/monthly", {
+          params: { month, type: businessType },
+        }),
+      );
+      const nextCells = {};
+      result.attendance.forEach((item) => {
+        nextCells[`${item.worker}:${item.date}`] = item.status;
+      });
+      setData(result);
+      setCells(nextCells);
+      setPeriodWorker((current) => current || result.workers[0]?._id || "");
+      setPeriodStart(`${month}-01`);
+      setPeriodEnd(`${month}-${String(result.days).padStart(2, "0")}`);
+      setSaved(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [month, businessType]);
+
+  const statusFor = (workerId, day) =>
+    cells[`${workerId}:${month}-${String(day).padStart(2, "0")}`] ||
+    "NOT_MARKED";
+  const cycleStatus = (workerId, day) => {
+    if (data.locked) return;
+    const dateKey = `${month}-${String(day).padStart(2, "0")}`;
+    const key = `${workerId}:${dateKey}`;
+    const current = cells[key] || "NOT_MARKED";
+    const next =
+      monthlyStatusOrder[
+        (monthlyStatusOrder.indexOf(current) + 1) % monthlyStatusOrder.length
+      ];
+    setCells((currentCells) => ({ ...currentCells, [key]: next }));
+    setSaved(false);
+  };
+  const applyPeriod = () => {
+    if (data.locked || !periodWorker || !periodStart || !periodEnd) return;
+    if (periodStart > periodEnd) {
+      setError("Period start must be before or equal to period end.");
+      return;
+    }
+    const nextCells = { ...cells };
+    for (
+      let current = periodStart;
+      current <= periodEnd;
+      current = `${current.slice(0, 8)}${String(Number(current.slice(8)) + 1).padStart(2, "0")}`
+    ) {
+      nextCells[`${periodWorker}:${current}`] = periodStatus;
+    }
+    setCells(nextCells);
+    setError("");
+    setSaved(false);
+  };
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const entries = data.workers.flatMap((worker) =>
+        Array.from({ length: data.days }, (_, index) => {
+          const day = index + 1;
+          return {
+            worker: worker._id,
+            date: `${month}-${String(day).padStart(2, "0")}`,
+            status: statusFor(worker._id, day),
+          };
+        }),
+      );
+      await request(api.post("/attendance/bulk", { month, entries }));
+      setSaved(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="ATTENDANCE"
+        title="Monthly attendance"
+        detail="Review and update a full month in one grid. Click a cell to cycle its status."
+        action={
+          <div className={`${styles["actions-inline"]}`}>
+            <Field label="Month">
+              <input
+                type="month"
+                value={month}
+                onChange={(event) => setMonth(event.target.value)}
+              />
+            </Field>
+            <button
+              className={`${styles["text-button"]}`}
+              onClick={onBack}
+              type="button"
+            >
+              Daily view
+            </button>
+          </div>
+        }
+      />
+      <Panel
+        title={`${businessType === "PAINTER" ? "Painter" : "Labour"} monthly grid`}
+        detail={`${data.workers.length} active workers · ${data.locked ? "Locked" : "Open"}`}
+        action={
+          <button
+            className={`${styles["button-primary"]}`}
+            onClick={save}
+            disabled={saving || loading || data.locked}
+            type="button"
+          >
+            <Save size={15} /> {saving ? "Saving…" : "Save month"}
+          </button>
+        }
+      >
+        <div className={`${styles["toolbar"]}`}>
+          <Field label="Labour">
+            <select
+              value={periodWorker}
+              onChange={(event) => setPeriodWorker(event.target.value)}
+              disabled={data.locked || loading}
+            >
+              {!data.workers.length && <option value="">No labour</option>}
+              {data.workers.map((worker) => (
+                <option key={worker._id} value={worker._id}>
+                  {worker.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="From">
+            <input
+              type="date"
+              value={periodStart}
+              min={`${month}-01`}
+              max={`${month}-${String(data.days).padStart(2, "0")}`}
+              onChange={(event) => setPeriodStart(event.target.value)}
+              disabled={data.locked || loading}
+            />
+          </Field>
+          <Field label="To">
+            <input
+              type="date"
+              value={periodEnd}
+              min={`${month}-01`}
+              max={`${month}-${String(data.days).padStart(2, "0")}`}
+              onChange={(event) => setPeriodEnd(event.target.value)}
+              disabled={data.locked || loading}
+            />
+          </Field>
+          <Field label="Mark as">
+            <select
+              value={periodStatus}
+              onChange={(event) => setPeriodStatus(event.target.value)}
+              disabled={data.locked || loading}
+            >
+              {Object.entries(statusMeta).map(([status, meta]) => (
+                <option key={status} value={status}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <button
+            className={`${styles["text-button"]}`}
+            onClick={applyPeriod}
+            disabled={data.locked || loading || !periodWorker}
+            type="button"
+          >
+            Apply period
+          </button>
+        </div>
+        <ErrorNote error={error} />
+        {saved && <Status tone="teal">Month saved</Status>}
+        {loading ? (
+          <Empty title="Loading month…" />
+        ) : (
+          <div
+            className={`${styles["table-wrap"]} ${styles["monthly-grid-wrap"]}`}
+          >
+            <table className={`${styles["monthly-grid"]}`}>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  {Array.from({ length: data.days }, (_, index) => (
+                    <th key={index + 1}>{index + 1}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.workers.map((worker) => (
+                  <tr key={worker._id}>
+                    <td>
+                      <strong>{worker.name}</strong>
+                      <small>
+                        {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                      </small>
+                    </td>
+                    {Array.from({ length: data.days }, (_, index) => {
+                      const day = index + 1;
+                      const status = statusFor(worker._id, day);
+                      const meta = statusMeta[status];
+                      return (
+                        <td key={day}>
+                          <button
+                            type="button"
+                            className={`${styles["monthly-cell"]} ${styles[`monthly-${status.toLowerCase()}`]}`}
+                            onClick={() => cycleStatus(worker._id, day)}
+                            disabled={data.locked}
+                            title={`${worker.name}, ${month}-${String(day).padStart(2, "0")}: ${meta.label}`}
+                          >
+                            {status === "DOUBLE_PRESENT"
+                              ? "2P"
+                              : status === "NOT_MARKED"
+                                ? "-"
+                                : status.charAt(0)}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!data.workers.length && <Empty title="No active workers" />}
+          </div>
+        )}
+      </Panel>
+    </>
+  );
+}
+
+export function AttendancePage({ businessType = "LABOUR" }) {
   const navigate = useNavigate();
-  const [workerType, setWorkerType] = useState("ALL");
+  const workerType = businessType;
   const [date, setDate] = useState(defaultDate());
   const [workers, setWorkers] = useState([]);
   const [summary, setSummary] = useState({
@@ -47,13 +312,13 @@ export function AttendancePage() {
   });
   const [typeSummary, setTypeSummary] = useState({
     LABOUR: { total: 0, PRESENT: 0, payable: 0 },
-    PAINTER: { total: 0, PRESENT: 0, payable: 0 },
   });
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [locked, setLocked] = useState(false);
   const [canEdit, setCanEdit] = useState(true);
   const [error, setError] = useState("");
+  const [view, setView] = useState("daily");
 
   const load = async () => {
     try {
@@ -70,7 +335,7 @@ export function AttendancePage() {
         canEdit: nextCanEdit,
       } = attendanceData;
       setWorkers(result || []);
-      setTypeSummary(nextTypeSummary || { LABOUR: {}, PAINTER: {} });
+      setTypeSummary(nextTypeSummary || { LABOUR: {} });
       setSummary(
         nextSummary || {
           NOT_MARKED: 0,
@@ -104,7 +369,7 @@ export function AttendancePage() {
 
   const changeWorkforceTab = (nextTab) => {
     if (nextTab === "ATTENDANCE") return;
-    navigate(`/workers?type=${nextTab}`);
+    navigate(`/${nextTab.toLowerCase()}/workers`);
   };
 
   const updateStatus = async (workerId, nextStatus) => {
@@ -209,49 +474,25 @@ export function AttendancePage() {
     }
   };
 
+  if (view === "monthly") {
+    return (
+      <MonthlyAttendance
+        businessType={workerType}
+        onBack={() => setView("daily")}
+      />
+    );
+  }
+
   return (
     <>
       <PageHeader
         eyebrow="ATTENDANCE"
-        title="Daily workforce attendance"
-        detail="Mark every active labour and painter once per day. Their category comes from the worker profile."
-        action={
-          <div className={`${styles["actions-inline"]}`}>
-            <Field label="Worker group">
-              <select
-                value={workerType}
-                onChange={(event) => setWorkerType(event.target.value)}
-              >
-                <option value="ALL">All workers</option>
-                <option value="LABOUR">Labour only</option>
-                <option value="PAINTER">Painters only</option>
-              </select>
-            </Field>
-            <Field label="Date">
-              <input
-                type="date"
-                value={date}
-                onChange={(event) => setDate(event.target.value)}
-              />
-            </Field>
-          </div>
-        }
-      />
-
-      <SectionTabs
-        value="ATTENDANCE"
-        showAttendance
-        onChange={(nextTab) => {
-          if (nextTab === "ATTENDANCE") return;
-          changeWorkforceTab(nextTab);
-        }}
+        title="Daily labour attendance"
+        detail="Mark every active labour worker once per day and keep payable amounts accurate."
       />
 
       <div className={`${styles["metric-grid"]} ${styles["compact-metrics"]}`}>
-        {[
-          ["LABOUR", "Labour", "teal"],
-          ["PAINTER", "Painters", "blue"],
-        ].map(([group, label, tone]) => (
+        {[["LABOUR", "Labour", "teal"]].map(([group, label, tone]) => (
           <div
             key={group}
             className={`${styles["metric"]} ${styles[`metric-${tone}`]}`}
@@ -292,6 +533,13 @@ export function AttendancePage() {
               <>
                 <button
                   className={`${styles["text-button"]}`}
+                  onClick={() => setView("monthly")}
+                  type="button"
+                >
+                  Monthly view
+                </button>
+                <button
+                  className={`${styles["text-button"]}`}
                   onClick={markAllPresent}
                   disabled={saving || locked}
                 >
@@ -322,6 +570,13 @@ export function AttendancePage() {
             onChange={setSearch}
             placeholder="Search worker name…"
           />
+          <Field label="Date">
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </Field>
         </div>
 
         <ErrorNote error={error} />
@@ -344,6 +599,7 @@ export function AttendancePage() {
                       <strong>{worker.name}</strong>
                       <small>
                         {worker.type === "PAINTER" ? "Painter" : "Labour"} ·{" "}
+                        {worker.teamName ? `${worker.teamName} · ` : ""}
                         {worker.phone || "No phone"} ·{" "}
                         {worker.dailyRate
                           ? `₹${worker.dailyRate}/day`

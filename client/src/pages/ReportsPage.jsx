@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -8,6 +8,8 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  ChevronDown,
+  ChevronUp,
   FilePlus2,
   History,
   IndianRupee,
@@ -42,16 +44,53 @@ import {
   typeTitle,
 } from "./shared.jsx";
 
-export function ReportsPage() {
-  const [type, setType] = useState("");
+export function ReportsPage({ businessType = "LABOUR" }) {
+  const type = businessType;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [data, setData] = useState();
+  const [attendanceData, setAttendanceData] = useState();
+  const [attendanceWorkers, setAttendanceWorkers] = useState([]);
+  const [attendanceWorker, setAttendanceWorker] = useState("");
+  const [expandedWorker, setExpandedWorker] = useState("");
+  const [attendancePrintMode, setAttendancePrintMode] = useState(false);
   const [error, setError] = useState("");
-  const load = () =>
-    request(api.get("/reports/operations", { params: { type, from, to } }))
-      .then(setData)
+  useEffect(() => {
+    const handleAfterPrint = () => setAttendancePrintMode(false);
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
+  useEffect(() => {
+    document.body.classList.toggle("attendance-pdf-mode", attendancePrintMode);
+    return () => document.body.classList.remove("attendance-pdf-mode");
+  }, [attendancePrintMode]);
+  const printAttendanceReport = () => {
+    setAttendancePrintMode(true);
+    window.setTimeout(() => window.print(), 0);
+  };
+  const load = () => {
+    setError("");
+    return Promise.all([
+      request(api.get("/reports/operations", { params: { type, from, to } })),
+      request(
+        api.get("/reports/attendance", {
+          params: {
+            from,
+            to,
+            ...(attendanceWorker ? { worker: attendanceWorker } : {}),
+          },
+        }),
+      ),
+    ])
+      .then(([operations, attendance]) => {
+        setData(operations);
+        setAttendanceData(attendance);
+        if (!attendanceWorker)
+          setAttendanceWorkers(attendance.workerSummaries || []);
+        setExpandedWorker("");
+      })
       .catch((err) => setError(errorMessage(err)));
+  };
   useEffect(() => {
     load();
   }, []);
@@ -65,11 +104,19 @@ export function ReportsPage() {
     headCount: 0,
   };
   return (
-    <>
+    <div className={attendancePrintMode ? "attendance-print-root" : undefined}>
       <PageHeader
         eyebrow="ANALYTICS & RECORDS"
-        title="Operations reports"
-        detail="Filter your work and money movements by period or business module."
+        title={
+          type === "PAINTER"
+            ? "Painter operations report"
+            : "Labour operations report"
+        }
+        detail={
+          type === "PAINTER"
+            ? "Filter painter work, cash and paint movement by period."
+            : "Filter labour work and payment movement by period."
+        }
         action={
           <Button
             icon={Printer}
@@ -85,16 +132,6 @@ export function ReportsPage() {
         detail="Apply a date range to inspect a particular period."
       >
         <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
-          <Field label="Supply module">
-            <select
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-            >
-              <option value="">Labour & painter</option>
-              <option value="LABOUR">Labour only</option>
-              <option value="PAINTER">Painter only</option>
-            </select>
-          </Field>
           <Field label="From date">
             <input
               type="date"
@@ -109,11 +146,153 @@ export function ReportsPage() {
               onChange={(event) => setTo(event.target.value)}
             />
           </Field>
-          <Button icon={RefreshCcw} className={`${styles["button-primary"]}`} onClick={load}>
+          <Button
+            icon={RefreshCcw}
+            className={`${styles["button-primary"]}`}
+            onClick={load}
+          >
             Apply filters
           </Button>
         </div>
         <ErrorNote error={error} />
+      </Panel>
+      <Panel
+        title="Attendance report"
+        detail="Compare every active labour worker across the selected period."
+        className="attendance-report-panel"
+        action={
+          <div className="attendance-print-action">
+            <Button
+              icon={Printer}
+              className={`${styles["button-secondary"]}`}
+              onClick={printAttendanceReport}
+              disabled={!attendanceData?.workerSummaries?.length}
+            >
+              Attendance PDF
+            </Button>
+          </div>
+        }
+      >
+        <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
+          <Field label="Labour">
+            <select
+              value={attendanceWorker}
+              onChange={(event) => setAttendanceWorker(event.target.value)}
+            >
+              <option value="">All labour</option>
+              {attendanceWorkers.map((worker) => (
+                <option key={worker.workerId} value={worker.workerId}>
+                  {worker.workerName}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button
+            icon={RefreshCcw}
+            className={`${styles["button-secondary"]}`}
+            onClick={load}
+          >
+            Apply attendance filter
+          </Button>
+        </div>
+        <div className={`${styles["table-wrap"]}`}>
+          <table>
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Present</th>
+                <th>2P</th>
+                <th>Absent</th>
+                <th>Half day</th>
+                <th>Leave</th>
+                <th>Not marked</th>
+                <th>Payable</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceData?.workerSummaries?.map((worker) => {
+                const isExpanded = expandedWorker === worker.workerId;
+                return (
+                  <Fragment key={worker.workerId}>
+                    <tr>
+                      <td>
+                        <strong>{worker.workerName}</strong>
+                        <small>
+                          {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                        </small>
+                      </td>
+                      <td>{worker.PRESENT}</td>
+                      <td>{worker.DOUBLE_PRESENT}</td>
+                      <td>{worker.ABSENT}</td>
+                      <td>{worker.HALF_DAY}</td>
+                      <td>{worker.LEAVE}</td>
+                      <td>{worker.NOT_MARKED}</td>
+                      <td>{money(worker.payable)}</td>
+                      <td>
+                        <button
+                          className={`${styles["icon-button"]}`}
+                          type="button"
+                          title={
+                            isExpanded
+                              ? "Hide daily details"
+                              : "Show daily details"
+                          }
+                          onClick={() =>
+                            setExpandedWorker(isExpanded ? "" : worker.workerId)
+                          }
+                        >
+                          {isExpanded ? (
+                            <ChevronUp size={16} />
+                          ) : (
+                            <ChevronDown size={16} />
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan="9">
+                          <div className={`${styles["table-wrap"]}`}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Status</th>
+                                  <th>Work units</th>
+                                  <th>Payable</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {worker.records.map((record) => (
+                                  <tr key={`${worker.workerId}-${record.date}`}>
+                                    <td>{date(record.date)}</td>
+                                    <td>
+                                      {record.status.replaceAll("_", " ")}
+                                    </td>
+                                    <td>{record.workUnits}</td>
+                                    <td>{money(record.payableAmount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {!attendanceData?.workerSummaries?.length && (
+                <tr>
+                  <td colSpan="9">
+                    <Empty title="No active labour for this filter" />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Panel>
       <div className={`${styles["metric-grid"]}`}>
         <Metric
@@ -146,8 +325,16 @@ export function ReportsPage() {
         />
       </div>
       <Panel
-        title="Work supply report"
-        detail="Every saved labour and painter assignment in the selected period."
+        title={
+          type === "PAINTER"
+            ? "Painter work supply report"
+            : "Labour work supply report"
+        }
+        detail={
+          type === "PAINTER"
+            ? "Every saved painter assignment in the selected period."
+            : "Every saved labour assignment in the selected period."
+        }
       >
         <div className={`${styles["table-wrap"]}`}>
           <table>
@@ -183,7 +370,9 @@ export function ReportsPage() {
                   <td className={`${styles["amount"]} ${styles["income"]}`}>
                     {money(record.billingAmount)}
                   </td>
-                  <td className={`${styles["amount"]}`}>{money(record.payoutAmount)}</td>
+                  <td className={`${styles["amount"]}`}>
+                    {money(record.payoutAmount)}
+                  </td>
                   <td>
                     <Status
                       tone={record.status === "ACTIVE" ? "blue" : "neutral"}
@@ -257,6 +446,6 @@ export function ReportsPage() {
           </table>
         </div>
       </Panel>
-    </>
+    </div>
   );
 }

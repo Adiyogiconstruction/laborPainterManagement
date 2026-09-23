@@ -170,6 +170,29 @@
 .topbar-context strong {
   font-size: 13px;
 }
+.workspace-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 14px 42px 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+}
+.workspace-tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 16px;
+  color: var(--muted);
+  border-bottom: 3px solid transparent;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+.workspace-tabs a:hover,
+.workspace-tabs a.active {
+  color: var(--teal);
+  border-bottom-color: var(--teal);
+}
 .secure-note {
   margin-left: auto;
   display: flex;

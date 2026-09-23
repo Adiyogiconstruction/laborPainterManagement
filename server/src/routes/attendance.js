@@ -35,9 +35,7 @@ const toDateString = (value) => {
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const type = ["LABOUR", "PAINTER"].includes(req.query.type)
-      ? req.query.type
-      : "ALL";
+    const type = "LABOUR";
     const dateValue = req.query.date || new Date().toISOString().slice(0, 10);
     const dateKey = toDateString(dateValue);
     const start = asDateOnly(dateValue);
@@ -45,11 +43,11 @@ router.get(
 
     const workers = await Worker.find({
       active: true,
-      ...(type === "ALL" ? {} : { type }),
+      type,
     }).sort({ name: 1 });
 
     const records = await Attendance.find({
-      ...(type === "ALL" ? {} : { type }),
+      type,
       date: { $gte: start, $lt: end },
     }).populate("worker", "name type phone skill");
 
@@ -127,16 +125,6 @@ router.get(
           DOUBLE_PRESENT: 0,
           payable: 0,
         },
-        PAINTER: {
-          total: 0,
-          PRESENT: 0,
-          HALF_DAY: 0,
-          ABSENT: 0,
-          LEAVE: 0,
-          NOT_MARKED: 0,
-          DOUBLE_PRESENT: 0,
-          payable: 0,
-        },
       },
     );
 
@@ -149,6 +137,161 @@ router.get(
       locked: Boolean(sheet?.locked),
       canEdit: ["OWNER", "ADMIN"].includes(req.user.role),
     });
+  }),
+);
+
+router.get(
+  "/monthly",
+  asyncHandler(async (req, res) => {
+    const month = String(req.query.month || "");
+    const type = "LABOUR";
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new ApiError(400, "Month must use YYYY-MM format.");
+    }
+    const [year, monthNumber] = month.split("-").map(Number);
+    const start = new Date(year, monthNumber - 1, 1);
+    const end = new Date(year, monthNumber, 1);
+    const days = new Date(year, monthNumber, 0).getDate();
+    const [workers, records, sheet] = await Promise.all([
+      Worker.find({
+        active: true,
+        type,
+      }).sort({ name: 1 }),
+      Attendance.find({
+        type,
+        date: { $gte: start, $lt: end },
+      }).select("worker date status overtimeHours overtimeRate payableAmount"),
+      AttendanceSheet.findOne({
+        type: "ALL",
+        assignment: null,
+        date: start,
+      }),
+    ]);
+    const attendance = records.map((record) => ({
+      worker: String(record.worker),
+      date: toDateString(record.date),
+      status: record.status,
+      overtimeHours: record.overtimeHours || 0,
+      overtimeRate: record.overtimeRate || 0,
+      payableAmount: record.payableAmount || 0,
+    }));
+    res.json({
+      month,
+      days,
+      locked: Boolean(sheet?.locked),
+      workers: workers.map((worker) => ({
+        ...worker.toObject(),
+        dailyRate: Number(worker.defaultDailyRate || 0),
+      })),
+      attendance,
+    });
+  }),
+);
+
+router.post(
+  "/bulk",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const { month, entries = [] } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(String(month || ""))) {
+      throw new ApiError(400, "Month must use YYYY-MM format.");
+    }
+    if (!Array.isArray(entries)) {
+      throw new ApiError(400, "Attendance entries must be an array.");
+    }
+    const [year, monthNumber] = String(month).split("-").map(Number);
+    const start = new Date(year, monthNumber - 1, 1);
+    const end = new Date(year, monthNumber, 1);
+    const sheet = await AttendanceSheet.findOne({
+      type: "ALL",
+      assignment: null,
+      date: start,
+      locked: true,
+    });
+    if (sheet) throw new ApiError(409, "This month is locked.");
+
+    const workerIds = [
+      ...new Set(entries.map((entry) => String(entry.worker))),
+    ];
+    const [workers, existingRecords] = await Promise.all([
+      Worker.find({ _id: { $in: workerIds }, active: true }),
+      Attendance.find({
+        worker: { $in: workerIds },
+        date: { $gte: start, $lt: end },
+      }),
+    ]);
+    const workersById = new Map(
+      workers.map((worker) => [String(worker._id), worker]),
+    );
+    const existingByKey = new Map(
+      existingRecords.map((record) => [
+        `${record.worker}:${toDateString(record.date)}`,
+        record,
+      ]),
+    );
+    const operations = [];
+    for (const entry of entries) {
+      const worker = workersById.get(String(entry.worker));
+      if (!worker || !/^\d{4}-\d{2}-\d{2}$/.test(String(entry.date))) continue;
+      const entryDate = new Date(`${entry.date}T00:00:00`);
+      if (entryDate < start || entryDate >= end) continue;
+      const key = `${worker._id}:${entry.date}`;
+      const existing = existingByKey.get(key);
+      if (existing?.locked) {
+        throw new ApiError(409, `Attendance for ${entry.date} is locked.`);
+      }
+      const status = normalizeAttendanceStatus(entry.status);
+      if (status === "NOT_MARKED") {
+        operations.push({
+          deleteOne: { filter: { worker: worker._id, date: entryDate } },
+        });
+        continue;
+      }
+      const overtimeHours = Number(
+        entry.overtimeHours ?? existing?.overtimeHours ?? 0,
+      );
+      const overtimeRate = Number(
+        entry.overtimeRate ??
+          existing?.overtimeRate ??
+          worker.overtimeHourlyRate ??
+          0,
+      );
+      operations.push({
+        updateOne: {
+          filter: { worker: worker._id, date: entryDate },
+          update: {
+            worker: worker._id,
+            type: worker.type,
+            assignment: null,
+            date: entryDate,
+            status,
+            workUnits: getWorkUnits(status),
+            hours: existing?.hours ?? 8,
+            checkIn: existing?.checkIn || "",
+            checkOut: existing?.checkOut || "",
+            overtimeHours,
+            dailyRate: Number(worker.defaultDailyRate || 0),
+            overtimeRate,
+            payableAmount: calculatePayableAmount({
+              dailyRate: Number(worker.defaultDailyRate || 0),
+              overtimeHours,
+              overtimeRate,
+              status,
+            }),
+            leaveReason: existing?.leaveReason || "",
+            notes: existing?.notes || "",
+            locked: false,
+            lockedAt: null,
+            lockedBy: null,
+            createdBy: req.user.id,
+            updatedBy: req.user.id,
+          },
+          upsert: true,
+        },
+      });
+    }
+    if (operations.length) await Attendance.bulkWrite(operations);
+    res.json({ saved: operations.length });
   }),
 );
 
