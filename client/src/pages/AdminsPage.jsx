@@ -361,6 +361,15 @@ export function AdminsPage() {
       <Panel
         title="Access activity"
         detail="Owner-only record of login times, logout times and recent admin actions."
+        action={
+          <Button
+            type="button"
+            className={`${styles["button-secondary"]}`}
+            onClick={load}
+          >
+            Refresh
+          </Button>
+        }
       >
         <div className={`${styles["table-wrap"]}`}>
           <table>

@@ -98,7 +98,7 @@ const htmlValue = (value) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-function printWorkers(workers, type) {
+function printWorkers(workers, type, profile = null) {
   const printWindow = window.open("", "_blank", "width=1200,height=800");
   if (!printWindow) return;
   const headers = exportColumns.map(([label]) => `<th>${label}</th>`).join("");
@@ -113,8 +113,24 @@ function printWorkers(workers, type) {
           .join("")}</tr>`,
     )
     .join("");
+
+  const companyName = profile?.companyName || "Company Name";
+  const companyAddress = profile?.address || "Address";
+  const companyPhone = profile?.mobile || "";
+  const companyEmail = profile?.email || "";
+  const companyGstin = profile?.gstin || "";
+  const companyPan = profile?.pan || "";
+  const companyLogoUrl = profile?.logoUrl || companyLogo;
+  const contactLine = [companyPhone, companyEmail].filter(Boolean).join(" | ");
+  const idLine = [
+    companyGstin ? `GSTIN: ${companyGstin}` : "",
+    companyPan ? `PAN: ${companyPan}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
   printWindow.document.write(
-    `<!doctype html><html><head><title>${typeTitle(type)} workforce</title><style>body{font-family:Arial,sans-serif;color:#192827}h1{font-size:20px;font-weight:600}p{color:#71817e;font-size:12px;font-weight:400}table{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th,td{border:1px solid #dce8e5;padding:5px;text-align:left;vertical-align:top;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th{background:#e3f4f0}</style></head><body><h1>${typeTitle(type)} workforce</h1><p>${workers.length} records</p><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print();</script></body></html>`,
+    `<!doctype html><html><head><title>${typeTitle(type)} workforce</title><style>body{font-family:Arial,sans-serif;color:#192827;margin:0;padding:18px;background:#fff}.company-header{display:flex;align-items:center;gap:18px;border:2px solid #1e514c;padding:14px 16px;margin-bottom:16px;background:#f6fbfa}.company-logo{width:86px;height:86px;object-fit:contain;border:1px solid #d9eae8;padding:6px;background:#fff}.company-meta{flex:1;text-align:center}.company-meta h1{margin:0;font-size:24px;letter-spacing:0.03em;color:#17312f}.company-meta p{margin:5px 0;font-size:11px;color:#5b6b69;line-height:1.4}.company-meta .title{display:block;margin-top:6px;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#17312f}.summary-line{font-size:12px;color:#71817e;margin:0 0 10px}.table-wrap{overflow:hidden;border:1px solid #dce8e5}table{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th,td{border:1px solid #dce8e5;padding:5px;text-align:left;vertical-align:top;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th{background:#e3f4f0;text-transform:uppercase}</style></head><body><section class="company-header"><img class="company-logo" src="${companyLogoUrl}" onerror="this.style.display='none'"/><div class="company-meta"><h1>${htmlValue(companyName)}</h1><p>${htmlValue(companyAddress)}</p>${contactLine ? `<p>${htmlValue(contactLine)}</p>` : ""}${idLine ? `<p>${htmlValue(idLine)}</p>` : ""}<span class="title">${htmlValue(typeTitle(type).toUpperCase())} WORKFORCE</span></div></section><p class="summary-line">${workers.length} records</p><div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div><script>window.onload=()=>window.print();</script></body></html>`,
   );
   printWindow.document.close();
   printWindow.onload = () => {
@@ -895,6 +911,7 @@ export function WorkersPage({ businessType = "LABOUR" }) {
   const [deleting, setDeleting] = useState();
   const [deletedWorkers, setDeletedWorkers] = useState([]);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
+  const [permanentlyDeleting, setPermanentlyDeleting] = useState();
   const [history, setHistory] = useState();
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -976,7 +993,11 @@ export function WorkersPage({ businessType = "LABOUR" }) {
     setExporting(true);
     setError("");
     try {
-      printWorkers(await getExportWorkers(), type);
+      const [workersExport, companyData] = await Promise.all([
+        getExportWorkers(),
+        request(api.get("/company-profile")).catch(() => null),
+      ]);
+      printWorkers(workersExport, type, companyData?.profile || null);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -1060,17 +1081,25 @@ export function WorkersPage({ businessType = "LABOUR" }) {
                       </td>
                       <td>{date(worker.deletedAt)}</td>
                       <td>
-                        <Button
-                          className={`${styles["button-secondary"]}`}
-                          onClick={async () => {
-                            await request(
-                              api.patch(`/workers/${worker._id}/restore`),
-                            );
-                            await Promise.all([load(), loadDeletedWorkers()]);
-                          }}
-                        >
-                          Restore
-                        </Button>
+                        <div className={`${styles["actions-inline"]}`}>
+                          <Button
+                            className={`${styles["button-secondary"]}`}
+                            onClick={async () => {
+                              await request(
+                                api.patch(`/workers/${worker._id}/restore`),
+                              );
+                              await Promise.all([load(), loadDeletedWorkers()]);
+                            }}
+                          >
+                            Restore
+                          </Button>
+                          <Button
+                            className={`${styles["button-danger"]}`}
+                            onClick={() => setPermanentlyDeleting(worker)}
+                          >
+                            Delete permanently
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1253,7 +1282,26 @@ export function WorkersPage({ businessType = "LABOUR" }) {
             setWorkers((current) =>
               current.filter((item) => item._id !== deleting._id),
             );
+            setDeletedWorkers((current) => [
+              { ...deleting, deletedAt: new Date().toISOString() },
+              ...current,
+            ]);
             setDeleting(null);
+          }}
+        />
+      )}
+      {permanentlyDeleting && (
+        <DeleteConfirm
+          itemLabel={`${typeTitle(permanentlyDeleting.type)} ${permanentlyDeleting.name}`}
+          onClose={() => setPermanentlyDeleting(null)}
+          onConfirm={async () => {
+            await request(
+              api.delete(`/workers/${permanentlyDeleting._id}/permanent`),
+            );
+            setDeletedWorkers((current) =>
+              current.filter((item) => item._id !== permanentlyDeleting._id),
+            );
+            setPermanentlyDeleting(null);
           }}
         />
       )}

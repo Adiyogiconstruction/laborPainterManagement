@@ -316,6 +316,29 @@ router.patch(
 );
 
 router.delete(
+  "/:id/permanent",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findById(req.params.id);
+    if (!worker) throw new ApiError(404, "Worker not found.");
+    if (!worker.deletedAt) {
+      throw new ApiError(
+        400,
+        "This worker is not deleted and cannot be permanently removed.",
+      );
+    }
+    await Worker.findByIdAndDelete(req.params.id);
+    await recordAdminActivity(
+      req,
+      "DELETE",
+      `${req.user.name} permanently deleted worker profile for ${worker.name}.`,
+      { workerId: worker.id, section: "workers", permanent: true },
+    );
+    res.json({ deletedId: worker.id });
+  }),
+);
+
+router.delete(
   "/:id",
   allowRoles("OWNER", "ADMIN"),
   asyncHandler(async (req, res) => {
