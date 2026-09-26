@@ -2,6 +2,7 @@ import { Router } from "express";
 import ExpenseCategory from "../models/ExpenseCategory.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
+import { recordAdminActivity } from "../utils/adminActivity.js";
 
 const router = Router();
 router.get(
@@ -23,6 +24,12 @@ router.post(
       ...req.body,
       createdBy: req.user.id,
     });
+    await recordAdminActivity(
+      req,
+      "CREATE",
+      `${req.user.name} created expense category ${category.name}.`,
+      { categoryId: category.id, section: "expense-categories" },
+    );
     res.status(201).json({ category });
   }),
 );
@@ -36,6 +43,12 @@ router.patch(
       { new: true, runValidators: true },
     );
     if (!category) throw new ApiError(404, "Expense category not found.");
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} updated expense category ${category.name}.`,
+      { categoryId: category.id, section: "expense-categories" },
+    );
     res.json({ category });
   }),
 );

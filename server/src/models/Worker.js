@@ -9,6 +9,7 @@ const workerSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true, maxlength: 100 },
+    companyName: { type: String, trim: true, maxlength: 150, default: "" },
     teamName: { type: String, trim: true, maxlength: 100, default: "" },
     phone: { type: String, required: true, trim: true, maxlength: 25 },
     aadhaarNumber: {
@@ -35,9 +36,15 @@ const workerSchema = new mongoose.Schema(
     joiningDate: { type: Date, required: true },
     active: { type: Boolean, default: true },
     notes: { type: String, trim: true, maxlength: 1000 },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   { timestamps: true },
 );
 
-workerSchema.index({ type: 1, name: 1 });
+workerSchema.index({ type: 1, name: 1, deletedAt: 1 });
 export default mongoose.model("Worker", workerSchema);

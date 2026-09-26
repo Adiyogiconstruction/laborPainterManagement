@@ -48,8 +48,7 @@ export function LoginPage({ onAuthenticated }) {
           <em>Calmer days.</em>
         </h1>
         <p>
-          One secure workspace for labour supply, payments, bills and daily
-          business decisions.
+          One secure workspace for workforce, attendance and payment decisions.
         </p>
         <div className={`${styles["login-points"]}`}>
           <span>✓ Labour records</span>

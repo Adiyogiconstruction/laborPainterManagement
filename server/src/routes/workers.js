@@ -1,42 +1,37 @@
 import { Router } from "express";
 import Worker from "../models/Worker.js";
 import Payment from "../models/Payment.js";
-import Assignment from "../models/Assignment.js";
 import Attendance from "../models/Attendance.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
+import { recordAdminActivity } from "../utils/adminActivity.js";
+import { parseWorkerSearch } from "../utils/workerSearch.js";
 import multer from "multer";
 import {
   authenticatedImageUrl,
   deleteImage,
+  optimizedImageUrl,
   uploadImage,
 } from "../services/cloudinary.js";
 
 const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    callback(
-      null,
-      ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype),
-    );
+    callback(null, file.mimetype.startsWith("image/"));
   },
 });
 const aadhaarUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    callback(
-      null,
-      ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype),
-    );
+    callback(null, file.mimetype.startsWith("image/"));
   },
 });
 const editable = [
   "type",
   "name",
+  "companyName",
   "teamName",
   "phone",
   "aadhaarNumber",
@@ -51,24 +46,50 @@ const editable = [
   "notes",
 ];
 
+const normalizeWorkerText = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+
+const normalizeWorkerFields = (data) => {
+  for (const field of [
+    "name",
+    "companyName",
+    "teamName",
+    "workZone",
+    "skill",
+    "address",
+  ]) {
+    if (data[field] !== undefined)
+      data[field] = normalizeWorkerText(data[field]);
+  }
+  return data;
+};
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const filter = {};
-    filter.type = "LABOUR";
+    const filter = { deletedAt: null };
+    const requestedType = req.query.type || "LABOUR";
+    filter.type = requestedType;
     if (req.query.active !== undefined)
       filter.active = req.query.active === "true";
     if (req.query.search) {
-      const escapedSearch = String(req.query.search).replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&",
-      );
-      const search = new RegExp(escapedSearch.slice(0, 80), "i");
-      filter.$or = [
-        { name: search },
-        { teamName: search },
-        { workZone: search },
-      ];
+      const { status, remaining } = parseWorkerSearch(req.query.search);
+
+      if (status !== undefined) filter.active = status;
+
+      if (remaining) {
+        const escapedSearch = remaining.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const search = new RegExp(escapedSearch.slice(0, 80), "i");
+        filter.$or = [
+          { name: search },
+          { companyName: search },
+          { teamName: search },
+          { workZone: search },
+        ];
+      }
     }
     const workers = await Worker.find(filter).sort({ active: -1, name: 1 });
     const workerIds = workers.map((worker) => worker._id);
@@ -133,8 +154,8 @@ router.post(
     if (!worker) throw new ApiError(404, "Worker not found.");
     const uploaded = await uploadImage(req.file.buffer, "workledger/workers");
     const oldPublicId = worker.photoPublicId;
-    worker.photoUrl = uploaded.secure_url;
-    worker.photoPath = uploaded.secure_url;
+    worker.photoUrl = optimizedImageUrl(uploaded.public_id);
+    worker.photoPath = worker.photoUrl;
     worker.photoPublicId = uploaded.public_id;
     await worker.save();
     await deleteImage(oldPublicId);
@@ -188,7 +209,10 @@ router.post(
   "/",
   allowRoles("OWNER", "ADMIN"),
   asyncHandler(async (req, res) => {
-    const data = { ...pick(req.body, editable), type: "LABOUR" };
+    const data = normalizeWorkerFields({
+      ...pick(req.body, editable),
+      type: "LABOUR",
+    });
     if (
       !data.type ||
       !data.name ||
@@ -206,6 +230,12 @@ router.post(
       );
     }
     const worker = await Worker.create(data);
+    await recordAdminActivity(
+      req,
+      "CREATE",
+      `${req.user.name} created worker profile for ${worker.name}.`,
+      { workerId: worker.id, section: "workers" },
+    );
     res.status(201).json({ worker });
   }),
 );
@@ -218,7 +248,7 @@ router.patch(
     if (!existing) throw new ApiError(404, "Worker not found.");
     const data = {
       ...existing.toObject(),
-      ...pick(req.body, editable),
+      ...normalizeWorkerFields(pick(req.body, editable)),
       type: "LABOUR",
     };
     if (
@@ -239,8 +269,47 @@ router.patch(
     }
     const worker = await Worker.findByIdAndUpdate(
       req.params.id,
-      { ...pick(req.body, editable), type: "LABOUR" },
+      { ...normalizeWorkerFields(pick(req.body, editable)), type: "LABOUR" },
       { new: true, runValidators: true },
+    );
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} updated worker profile for ${worker.name}.`,
+      { workerId: worker.id, section: "workers" },
+    );
+    res.json({ worker });
+  }),
+);
+
+router.get(
+  "/deleted",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (_req, res) => {
+    const workers = await Worker.find({ deletedAt: { $ne: null } })
+      .sort({ deletedAt: -1, updatedAt: -1 })
+      .limit(200);
+    res.json({ workers });
+  }),
+);
+
+router.patch(
+  "/:id/restore",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findById(req.params.id);
+    if (!worker) throw new ApiError(404, "Worker not found.");
+    if (!worker.deletedAt) {
+      throw new ApiError(400, "This worker is not deleted.");
+    }
+    worker.deletedAt = null;
+    worker.deletedBy = null;
+    await worker.save();
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} restored worker profile for ${worker.name}.`,
+      { workerId: worker.id, section: "workers", restored: true },
     );
     res.json({ worker });
   }),
@@ -252,17 +321,21 @@ router.delete(
   asyncHandler(async (req, res) => {
     const worker = await Worker.findById(req.params.id);
     if (!worker) throw new ApiError(404, "Worker not found.");
-    const [assignmentCount, paymentCount] = await Promise.all([
-      Assignment.countDocuments({ worker: worker.id }),
-      Payment.countDocuments({ worker: worker.id }),
-    ]);
-    if (assignmentCount || paymentCount) {
+    if (worker.deletedAt) {
       throw new ApiError(
-        409,
-        "This worker has linked work or payment history. Deactivate the worker instead of deleting it.",
+        400,
+        "This worker is already deleted and is in the recycle bin.",
       );
     }
-    await worker.deleteOne();
+    worker.deletedAt = new Date();
+    worker.deletedBy = req.user.id;
+    await worker.save();
+    await recordAdminActivity(
+      req,
+      "DELETE",
+      `${req.user.name} moved worker profile for ${worker.name} to recycle bin.`,
+      { workerId: worker.id, section: "workers" },
+    );
     res.json({ deletedId: worker.id });
   }),
 );
@@ -298,39 +371,48 @@ router.get(
       attendanceFilter.date = dateFilter;
       paymentFilter.paidOn = dateFilter;
     }
-    const [payments, attendance, attendanceSummary] = await Promise.all([
-      Payment.find(paymentFilter)
-        .populate("assignment", "siteName workDescription")
-        .sort({ paidOn: -1 }),
-      Attendance.find(attendanceFilter)
-        .populate("assignment", "siteName workDescription")
-        .sort({ date: -1 }),
-      Attendance.aggregate([
-        { $match: { ...attendanceFilter, worker: worker._id } },
-        {
-          $group: {
-            _id: null,
-            totalPayable: { $sum: "$payableAmount" },
-            days: { $sum: 1 },
-            presentDays: {
-              $sum: {
-                $cond: [
-                  { $in: ["$status", ["PRESENT", "DOUBLE_PRESENT"]] },
-                  1,
-                  0,
-                ],
+    const attendancePage = Math.max(
+      1,
+      Number.parseInt(req.query.attendancePage, 10) || 1,
+    );
+    const attendanceLimit = Math.min(
+      50,
+      Math.max(1, Number.parseInt(req.query.attendanceLimit, 10) || 10),
+    );
+    const [payments, attendance, attendanceCount, attendanceSummary] =
+      await Promise.all([
+        Payment.find(paymentFilter).sort({ paidOn: -1 }),
+        Attendance.find(attendanceFilter)
+          .sort({ date: -1 })
+          .skip((attendancePage - 1) * attendanceLimit)
+          .limit(attendanceLimit),
+        Attendance.countDocuments(attendanceFilter),
+        Attendance.aggregate([
+          { $match: { ...attendanceFilter, worker: worker._id } },
+          {
+            $group: {
+              _id: null,
+              totalPayable: { $sum: "$payableAmount" },
+              days: { $sum: 1 },
+              presentDays: {
+                $sum: {
+                  $cond: [
+                    { $in: ["$status", ["PRESENT", "DOUBLE_PRESENT"]] },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              doubleDays: {
+                $sum: { $cond: [{ $eq: ["$status", "DOUBLE_PRESENT"] }, 1, 0] },
+              },
+              halfDays: {
+                $sum: { $cond: [{ $eq: ["$status", "HALF_DAY"] }, 1, 0] },
               },
             },
-            doubleDays: {
-              $sum: { $cond: [{ $eq: ["$status", "DOUBLE_PRESENT"] }, 1, 0] },
-            },
-            halfDays: {
-              $sum: { $cond: [{ $eq: ["$status", "HALF_DAY"] }, 1, 0] },
-            },
           },
-        },
-      ]),
-    ]);
+        ]),
+      ]);
     const totalPaid = payments
       .filter((payment) => payment.flow === "OUTFLOW" && payment.worker)
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
@@ -349,6 +431,12 @@ router.get(
         totalPaid,
         totalDue: Math.max(0, Number(totals.totalPayable || 0) - totalPaid),
         overpaid: Math.max(0, totalPaid - Number(totals.totalPayable || 0)),
+      },
+      attendancePagination: {
+        page: attendancePage,
+        limit: attendanceLimit,
+        total: attendanceCount,
+        pages: Math.ceil(attendanceCount / attendanceLimit),
       },
     });
   }),

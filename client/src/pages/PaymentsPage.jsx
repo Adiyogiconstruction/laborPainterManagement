@@ -70,6 +70,7 @@ function PaymentForm({ businessType, onClose, onSaved }) {
     setWorkerSearch(worker.name);
     setShowWorkerResults(false);
   };
+  const selectedWorker = workers.find((worker) => worker._id === form.worker);
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -98,8 +99,56 @@ function PaymentForm({ businessType, onClose, onSaved }) {
         className={`${styles["form-grid"]} ${styles["three-col"]}`}
         onSubmit={save}
       >
-        <Field label="Money flow">
-          <input value="Money paid to workforce" readOnly />
+        <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
+          <div className={`${styles["worker-picker"]}`}>
+            <input
+              required
+              value={workerSearch}
+              onFocus={() => setShowWorkerResults(true)}
+              onChange={(event) => {
+                setWorkerSearch(event.target.value);
+                setForm({ ...form, worker: "" });
+                setShowWorkerResults(true);
+              }}
+              placeholder="Search and select worker"
+              role="combobox"
+              aria-expanded={showWorkerResults}
+              aria-controls="payment-worker-results"
+            />
+            {selectedWorker && (
+              <div className={`${styles["payment-worker-due"]}`}>
+                <strong>
+                  Current due: {money(selectedWorker.totalDue || 0)}
+                </strong>
+                <small>
+                  Payable {money(selectedWorker.totalPayable || 0)} · Paid{" "}
+                  {money(selectedWorker.totalPaid || 0)}
+                </small>
+              </div>
+            )}
+            {showWorkerResults && (
+              <div
+                className={`${styles["worker-picker-results"]}`}
+                id="payment-worker-results"
+              >
+                {filteredWorkers.length ? (
+                  filteredWorkers.slice(0, 8).map((worker) => (
+                    <button
+                      type="button"
+                      key={worker._id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectWorker(worker)}
+                    >
+                      <strong>{worker.name}</strong>
+                      <small>Due: {money(worker.totalDue || 0)}</small>
+                    </button>
+                  ))
+                ) : (
+                  <span>No worker found</span>
+                )}
+              </div>
+            )}
+          </div>
         </Field>
         <Field label="Payment type">
           <select value={form.kind} onChange={change("kind")}>
@@ -138,45 +187,6 @@ function PaymentForm({ businessType, onClose, onSaved }) {
             <option value="CHEQUE">Cheque</option>
             <option value="OTHER">Other</option>
           </select>
-        </Field>
-        <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
-          <div className={`${styles["worker-picker"]}`}>
-            <input
-              required
-              value={workerSearch}
-              onFocus={() => setShowWorkerResults(true)}
-              onChange={(event) => {
-                setWorkerSearch(event.target.value);
-                setForm({ ...form, worker: "" });
-                setShowWorkerResults(true);
-              }}
-              placeholder="Type worker name"
-              role="combobox"
-              aria-expanded={showWorkerResults}
-              aria-controls="payment-worker-results"
-            />
-            {showWorkerResults && workerSearch.trim() && (
-              <div
-                className={`${styles["worker-picker-results"]}`}
-                id="payment-worker-results"
-              >
-                {filteredWorkers.length ? (
-                  filteredWorkers.slice(0, 8).map((worker) => (
-                    <button
-                      type="button"
-                      key={worker._id}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => selectWorker(worker)}
-                    >
-                      {worker.name}
-                    </button>
-                  ))
-                ) : (
-                  <span>No worker found</span>
-                )}
-              </div>
-            )}
-          </div>
         </Field>
         <Field label="Reference">
           <input
@@ -226,9 +236,19 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
   const [payments, setPayments] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [selectedWorker, setSelectedWorker] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
+  const [methodFilter, setMethodFilter] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState();
+  const [deletedPayments, setDeletedPayments] = useState([]);
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [error, setError] = useState("");
+  const loadWorkers = () =>
+    request(api.get("/workers", { params: { type: businessType } }))
+      .then(({ workers: result }) => setWorkers(result || []))
+      .catch((err) => setError(errorMessage(err)));
   const load = () =>
     request(
       api.get("/payments", {
@@ -236,27 +256,47 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
           flow: "OUTFLOW",
           type: businessType,
           ...(selectedWorker ? { worker: selectedWorker } : {}),
+          ...(kindFilter ? { kind: kindFilter } : {}),
+          ...(methodFilter ? { method: methodFilter } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
         },
       }),
     )
       .then(({ payments: result }) => setPayments(result))
       .catch((err) => setError(errorMessage(err)));
+  const loadDeletedPayments = () =>
+    request(api.get("/payments/deleted"))
+      .then(({ payments: result }) => setDeletedPayments(result || []))
+      .catch((err) => setError(errorMessage(err)));
+  useEffect(() => {
+    loadWorkers();
+  }, [businessType]);
   useEffect(() => {
     load();
-  }, [businessType, selectedWorker]);
-  useEffect(() => {
-    if (businessType !== "PAINTER") return;
-    request(api.get("/workers", { params: { type: businessType } }))
-      .then(({ workers: result }) => setWorkers(result))
-      .catch(() => setWorkers([]));
-  }, [businessType]);
-  const totalPaid = payments.reduce(
-    (total, item) => total + Number(item.amount || 0),
+  }, [businessType, selectedWorker, kindFilter, methodFilter, from, to]);
+  const balanceWorkers = selectedWorker
+    ? workers.filter((worker) => worker._id === selectedWorker)
+    : workers;
+  const totalPayable = balanceWorkers.reduce(
+    (total, worker) => total + Number(worker.totalPayable || 0),
     0,
   );
-  const filteredWorkerName =
+  const totalWorkerPaid = balanceWorkers.reduce(
+    (total, worker) => total + Number(worker.totalPaid || 0),
+    0,
+  );
+  const totalDue = balanceWorkers.reduce(
+    (total, worker) => total + Number(worker.totalDue || 0),
+    0,
+  );
+  const extraPaid = balanceWorkers.reduce(
+    (total, worker) => total + Number(worker.overpaid || 0),
+    0,
+  );
+  const selectedWorkerName =
     workers.find((worker) => worker._id === selectedWorker)?.name ||
-    "Selected painter";
+    (businessType === "PAINTER" ? "All painters" : "All workers");
   return (
     <>
       <PageHeader
@@ -274,64 +314,187 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
             : "Track labour wages, advances and payout records separately from painter work."
         }
         action={
-          <AddButton
-            className={`${styles["button-primary"]}`}
-            onClick={() => setAdding(true)}
-          >
-            Record payment
-          </AddButton>
+          <div className={`${styles["actions-inline"]}`}>
+            <Button
+              className={`${styles["button-secondary"]}`}
+              onClick={() => {
+                setShowRecycleBin((current) => !current);
+                if (!showRecycleBin) loadDeletedPayments();
+              }}
+              icon={Trash2}
+            >
+              Recycle bin
+            </Button>
+            <AddButton
+              className={`${styles["button-primary"]}`}
+              onClick={() => setAdding(true)}
+            >
+              Record payment
+            </AddButton>
+          </div>
         }
       />
-      {businessType === "PAINTER" && (
-        <Panel
-          title="Painter ledger filter"
-          detail="Select a painter to inspect that person’s cash ledger and payouts."
-        >
-          <div className={`${styles["toolbar"]}`}>
+      <Panel
+        title="Payment filters"
+        detail="Filter the ledger and inspect the selected worker's balance."
+      >
+        <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
+          <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
             <select
               value={selectedWorker}
               onChange={(event) => setSelectedWorker(event.target.value)}
             >
-              <option value="">All painters</option>
+              <option value="">All workers</option>
               {workers.map((worker) => (
                 <option key={worker._id} value={worker._id}>
                   {worker.name}
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label="Payment type">
+            <select
+              value={kindFilter}
+              onChange={(event) => setKindFilter(event.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="WAGE">Wage</option>
+              <option value="ADVANCE">Advance</option>
+              <option value="TRAVEL_ADVANCE">Advance for ticket</option>
+              <option value="EXPENSE">Kharchi</option>
+              <option value="ADJUSTMENT">Adjustment</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </Field>
+          <Field label="Payment method">
+            <select
+              value={methodFilter}
+              onChange={(event) => setMethodFilter(event.target.value)}
+            >
+              <option value="">All methods</option>
+              <option value="CASH">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="BANK">Bank transfer</option>
+              <option value="CHEQUE">Cheque</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </Field>
+          <Field label="From date">
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+            />
+          </Field>
+          <Field label="To date">
+            <input
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+            />
+          </Field>
+          <Button
+            className={`${styles["button-ghost"]}`}
+            onClick={() => {
+              setSelectedWorker("");
+              setKindFilter("");
+              setMethodFilter("");
+              setFrom("");
+              setTo("");
+            }}
+          >
+            Clear filters
+          </Button>
+        </div>
+      </Panel>
+      {showRecycleBin && (
+        <Panel
+          title="Recycle bin"
+          detail="Deleted payment records stay here until you restore them."
+        >
+          <div className={`${styles["table-wrap"]}`}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Deleted</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {deletedPayments.length ? (
+                  deletedPayments.map((payment) => (
+                    <tr key={payment._id}>
+                      <td>{payment.worker?.name || "Business expense"}</td>
+                      <td>{payment.kind}</td>
+                      <td className={`${styles["amount"]}`}>
+                        {money(payment.amount)}
+                      </td>
+                      <td>{date(payment.deletedAt)}</td>
+                      <td>
+                        <Button
+                          className={`${styles["button-secondary"]}`}
+                          onClick={async () => {
+                            await request(
+                              api.patch(`/payments/${payment._id}/restore`),
+                            );
+                            await Promise.all([
+                              load(),
+                              loadDeletedPayments(),
+                              loadWorkers(),
+                            ]);
+                          }}
+                        >
+                          Restore
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="5">
+                      <Empty
+                        title="Recycle bin empty"
+                        detail="No deleted payment records yet."
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </Panel>
       )}
       <div className={`${styles["metric-grid"]} ${styles["compact-metrics"]}`}>
         <Metric
-          label={
-            businessType === "PAINTER"
-              ? `${filteredWorkerName} cash paid`
-              : "Total paid to workforce"
-          }
-          value={money(totalPaid)}
-          detail={
-            businessType === "PAINTER"
-              ? "Painter payout ledger"
-              : "Wages, advances and adjustments"
-          }
-          tone="coral"
+          label={`${selectedWorkerName} total payable`}
+          value={money(totalPayable)}
+          detail="Attendance and payable total"
+          tone="teal"
           icon={ArrowUpRight}
         />
         <Metric
-          label={
-            businessType === "PAINTER"
-              ? "Painter payment records"
-              : "Labour payment records"
-          }
-          value={payments.length}
-          detail={
-            businessType === "PAINTER"
-              ? "Visible painter entries"
-              : "Visible labour payout entries"
-          }
-          tone="purple"
+          label="Total paid"
+          value={money(totalWorkerPaid)}
+          detail={`${payments.length} filtered payment records`}
+          tone="coral"
           icon={Landmark}
+        />
+        <Metric
+          label="Payment due"
+          value={money(totalDue)}
+          detail="Amount still payable"
+          tone="amber"
+          icon={Landmark}
+        />
+        <Metric
+          label="Extra paid"
+          value={money(extraPaid)}
+          detail="Paid above payable total"
+          tone="purple"
+          icon={ArrowUpRight}
         />
       </div>
       <Panel>
@@ -406,9 +569,9 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
         <PaymentForm
           businessType={businessType}
           onClose={() => setAdding(false)}
-          onSaved={(payment) => {
+          onSaved={async () => {
             setAdding(false);
-            setPayments((current) => [payment, ...current]);
+            await Promise.all([load(), loadWorkers()]);
           }}
         />
       )}
@@ -418,9 +581,7 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
             await request(api.delete(`/payments/${deleting._id}`));
-            setPayments((current) =>
-              current.filter((item) => item._id !== deleting._id),
-            );
+            await Promise.all([load(), loadWorkers()]);
             setDeleting(null);
           }}
         />

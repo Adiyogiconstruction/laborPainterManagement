@@ -2,12 +2,7 @@ import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema(
   {
-    flow: {
-      type: String,
-      enum: ["INFLOW", "OUTFLOW"],
-      required: true,
-      index: true,
-    },
+    flow: { type: String, enum: ["OUTFLOW"], default: "OUTFLOW", index: true },
     kind: {
       type: String,
       enum: [
@@ -28,16 +23,6 @@ const paymentSchema = new mongoose.Schema(
       ref: "Worker",
       index: true,
     },
-    client: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Client",
-      index: true,
-    },
-    assignment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Assignment",
-      index: true,
-    },
     method: {
       type: String,
       enum: ["CASH", "UPI", "BANK", "CHEQUE", "OTHER"],
@@ -50,14 +35,18 @@ const paymentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   { timestamps: true },
 );
 
 paymentSchema.pre("validate", function validateCounterparty(next) {
-  if (this.flow === "INFLOW" && !this.client)
-    return next(new Error("Client is required for money received."));
-  if (this.flow === "OUTFLOW" && this.kind !== "EXPENSE" && !this.worker) {
+  if (this.kind !== "EXPENSE" && !this.worker) {
     return next(new Error("Worker is required for this payment."));
   }
   if (this.kind === "OTHER" && !String(this.notes || "").trim()) {
@@ -66,5 +55,5 @@ paymentSchema.pre("validate", function validateCounterparty(next) {
   next();
 });
 
-paymentSchema.index({ paidOn: -1, flow: 1 });
+paymentSchema.index({ paidOn: -1, flow: 1, deletedAt: 1 });
 export default mongoose.model("Payment", paymentSchema);

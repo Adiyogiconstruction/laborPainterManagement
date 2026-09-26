@@ -10,6 +10,7 @@ const companyProfileSchema = new mongoose.Schema(
     mobile: { type: String, trim: true, default: "" },
     pan: { type: String, trim: true, uppercase: true, default: "" },
     email: { type: String, trim: true, lowercase: true, default: "" },
+    rules: { type: [String], default: [] },
     bankDetails: {
       accountName: { type: String, trim: true, default: "" },
       accountNumber: { type: String, trim: true, default: "" },

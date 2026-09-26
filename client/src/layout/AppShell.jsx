@@ -6,8 +6,6 @@ import {
   useLocation,
 } from "react-router-dom";
 import {
-  Building2,
-  BriefcaseBusiness,
   CalendarDays,
   ChartNoAxesCombined,
   LayoutDashboard,
@@ -23,9 +21,7 @@ import { useState } from "react";
 import companyLogo from "../assets/image.png";
 import {
   AdminsPage,
-  AssignmentsPage,
   AttendancePage,
-  ClientsPage,
   DashboardPage,
   PaymentsPage,
   ReportsPage,
@@ -49,13 +45,6 @@ const labourNavGroups = [
       ["/labour/payments", "Payments", WalletCards],
     ],
   },
-  {
-    label: "Clients & sites",
-    items: [
-      ["/labour/clients", "Clients & Sites", Building2],
-      ["/labour/work", "Work Supply", BriefcaseBusiness],
-    ],
-  },
 ];
 
 const labourRoutes = (
@@ -68,14 +57,6 @@ const labourRoutes = (
     <Route
       path="/labour/attendance"
       element={<AttendancePage businessType="LABOUR" />}
-    />
-    <Route
-      path="/labour/clients"
-      element={<ClientsPage businessType="LABOUR" />}
-    />
-    <Route
-      path="/labour/work"
-      element={<AssignmentsPage businessType="LABOUR" />}
     />
     <Route
       path="/labour/payments"

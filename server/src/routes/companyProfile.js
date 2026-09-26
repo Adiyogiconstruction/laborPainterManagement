@@ -2,6 +2,7 @@ import { Router } from "express";
 import CompanyProfile from "../models/CompanyProfile.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
+import { recordAdminActivity } from "../utils/adminActivity.js";
 import { pick } from "../utils/serializers.js";
 
 const router = Router();
@@ -14,6 +15,7 @@ const editable = [
   "mobile",
   "pan",
   "email",
+  "rules",
   "bankDetails",
 ];
 
@@ -27,6 +29,13 @@ const defaults = {
   mobile: "8879621052",
   pan: "ACAFA7740F",
   email: "adiyogiconstruction1@gmail.com",
+  rules: [
+    "PPE is mandatory at all times.",
+    "Consumption of alcohol or tobacco at the worksite is strictly prohibited.",
+    "Follow all safety guidelines provided by the supervisor.",
+    "Report any injury immediately to the supervisor.",
+    "Maintain cleanliness at the worksite.",
+  ],
   bankDetails: {
     accountName: "ADIYOGI CONSTRUCTIONS",
     accountNumber: "643605051514",
@@ -59,6 +68,12 @@ router.patch(
     if (!data.companyName) throw new ApiError(400, "Company name is required.");
     Object.assign(current, data);
     await current.save();
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} updated the company profile and PDF rules.`,
+      { section: "company-profile" },
+    );
     res.json({ profile: current });
   }),
 );

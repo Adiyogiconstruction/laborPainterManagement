@@ -4,6 +4,7 @@ import Worker from "../models/Worker.js";
 import AttendanceSheet from "../models/AttendanceSheet.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
+import { recordAdminActivity } from "../utils/adminActivity.js";
 import {
   buildAttendanceMap,
   calculatePayableAmount,
@@ -54,7 +55,6 @@ router.get(
     const attendanceByWorker = buildAttendanceMap(records);
     const sheet = await AttendanceSheet.findOne({
       type: "ALL",
-      assignment: null,
       date: start,
     });
 
@@ -163,7 +163,6 @@ router.get(
       }).select("worker date status overtimeHours overtimeRate payableAmount"),
       AttendanceSheet.findOne({
         type: "ALL",
-        assignment: null,
         date: start,
       }),
     ]);
@@ -179,6 +178,7 @@ router.get(
       month,
       days,
       locked: Boolean(sheet?.locked),
+      canEdit: ["OWNER", "ADMIN"].includes(req.user.role),
       workers: workers.map((worker) => ({
         ...worker.toObject(),
         dailyRate: Number(worker.defaultDailyRate || 0),
@@ -204,7 +204,6 @@ router.post(
     const end = new Date(year, monthNumber, 1);
     const sheet = await AttendanceSheet.findOne({
       type: "ALL",
-      assignment: null,
       date: start,
       locked: true,
     });
@@ -260,37 +259,45 @@ router.post(
         updateOne: {
           filter: { worker: worker._id, date: entryDate },
           update: {
-            worker: worker._id,
-            type: worker.type,
-            assignment: null,
-            date: entryDate,
-            status,
-            workUnits: getWorkUnits(status),
-            hours: existing?.hours ?? 8,
-            checkIn: existing?.checkIn || "",
-            checkOut: existing?.checkOut || "",
-            overtimeHours,
-            dailyRate: Number(worker.defaultDailyRate || 0),
-            overtimeRate,
-            payableAmount: calculatePayableAmount({
-              dailyRate: Number(worker.defaultDailyRate || 0),
-              overtimeHours,
-              overtimeRate,
+            $set: {
+              worker: worker._id,
+              type: worker.type,
+              date: entryDate,
               status,
-            }),
-            leaveReason: existing?.leaveReason || "",
-            notes: existing?.notes || "",
-            locked: false,
-            lockedAt: null,
-            lockedBy: null,
-            createdBy: req.user.id,
-            updatedBy: req.user.id,
+              workUnits: getWorkUnits(status),
+              hours: existing?.hours ?? 8,
+              checkIn: existing?.checkIn || "",
+              checkOut: existing?.checkOut || "",
+              overtimeHours,
+              dailyRate: Number(worker.defaultDailyRate || 0),
+              overtimeRate,
+              payableAmount: calculatePayableAmount({
+                dailyRate: Number(worker.defaultDailyRate || 0),
+                overtimeHours,
+                overtimeRate,
+                status,
+              }),
+              leaveReason: existing?.leaveReason || "",
+              notes: existing?.notes || "",
+              locked: false,
+              lockedAt: null,
+              lockedBy: null,
+              updatedBy: req.user.id,
+            },
+            $setOnInsert: { createdBy: req.user.id },
           },
           upsert: true,
+          setDefaultsOnInsert: false,
         },
       });
     }
     if (operations.length) await Attendance.bulkWrite(operations);
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} bulk updated attendance for ${month}.`,
+      { month, section: "attendance", entries: operations.length },
+    );
     res.json({ saved: operations.length });
   }),
 );
@@ -351,7 +358,6 @@ router.put(
       {
         worker,
         type: workerType,
-        assignment: null,
         date: baseDate,
         status: normalizedStatus,
         workUnits,
@@ -377,6 +383,12 @@ router.put(
       },
     ).populate("worker", "name type phone skill");
 
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} updated attendance for ${attendance?.worker?.name || workerRecord.name} on ${date}.`,
+      { workerId: workerRecord.id, date, section: "attendance" },
+    );
     res.json({ attendance });
   }),
 );
@@ -408,7 +420,6 @@ router.post(
     const rows = sourceRows.map((item) => ({
       ...item.toObject(),
       _id: undefined,
-      assignment: null,
       date: targetDate,
       locked: false,
       lockedAt: null,
@@ -425,7 +436,55 @@ router.post(
       date: targetDate,
     });
     const inserted = await Attendance.insertMany(rows);
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} copied attendance from yesterday to ${date}.`,
+      { date, section: "attendance", copied: inserted.length },
+    );
     res.json({ copied: inserted.length });
+  }),
+);
+
+router.patch(
+  "/lock-month",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const { month, locked = true } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(String(month || ""))) {
+      throw new ApiError(400, "Month must use YYYY-MM format.");
+    }
+    const [year, monthNumber] = String(month).split("-").map(Number);
+    const start = new Date(year, monthNumber - 1, 1);
+    const end = new Date(year, monthNumber, 1);
+    const sheet = await AttendanceSheet.findOneAndUpdate(
+      { type: "ALL", date: start },
+      {
+        type: "ALL",
+        date: start,
+        locked: Boolean(locked),
+        lockedAt: locked ? new Date() : null,
+        lockedBy: locked ? req.user.id : null,
+      },
+      { upsert: true, new: true },
+    );
+    await Attendance.updateMany(
+      { date: { $gte: start, $lt: end } },
+      {
+        $set: {
+          locked: Boolean(locked),
+          lockedAt: locked ? new Date() : null,
+          lockedBy: locked ? req.user.id : null,
+        },
+      },
+    );
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} ${locked ? "locked" : "unlocked"} attendance for ${month}.`,
+      { month, locked, section: "attendance" },
+    );
+    res.json({ locked: Boolean(locked), sheet });
   }),
 );
 
@@ -439,10 +498,9 @@ router.patch(
     }
     const baseDate = asDateOnly(date);
     const sheet = await AttendanceSheet.findOneAndUpdate(
-      { type: "ALL", assignment: null, date: baseDate },
+      { type: "ALL", date: baseDate },
       {
         type: "ALL",
-        assignment: null,
         date: baseDate,
         locked,
         lockedAt: locked ? new Date() : null,
@@ -458,6 +516,13 @@ router.patch(
         lockedAt: locked ? new Date() : null,
         lockedBy: locked ? req.user.id : null,
       },
+    );
+
+    await recordAdminActivity(
+      req,
+      "UPDATE",
+      `${req.user.name} ${locked ? "locked" : "unlocked"} attendance for ${date}.`,
+      { date, locked, section: "attendance" },
     );
 
     const payableSummary = await Attendance.aggregate([

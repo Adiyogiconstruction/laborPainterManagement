@@ -52,6 +52,15 @@ export function ReportsPage({ businessType = "LABOUR" }) {
   const [attendanceData, setAttendanceData] = useState();
   const [attendanceWorkers, setAttendanceWorkers] = useState([]);
   const [attendanceWorker, setAttendanceWorker] = useState("");
+  const [reportTab, setReportTab] = useState("ATTENDANCE");
+  const [analyticsData, setAnalyticsData] = useState();
+  const [workerOptions, setWorkerOptions] = useState([]);
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [workZoneFilter, setWorkZoneFilter] = useState("");
+  const [skillFilter, setSkillFilter] = useState("");
+  const [paymentKind, setPaymentKind] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [expandedWorker, setExpandedWorker] = useState("");
   const [attendancePrintMode, setAttendancePrintMode] = useState(false);
   const [error, setError] = useState("");
@@ -71,7 +80,22 @@ export function ReportsPage({ businessType = "LABOUR" }) {
   const load = () => {
     setError("");
     return Promise.all([
-      request(api.get("/reports/operations", { params: { type, from, to } })),
+      request(
+        api.get("/reports/operations", {
+          params: {
+            type,
+            from,
+            to,
+            worker: attendanceWorker,
+            companyName: companyFilter,
+            teamName: teamFilter,
+            workZone: workZoneFilter,
+            skill: skillFilter,
+            kind: paymentKind,
+            method: paymentMethod,
+          },
+        }),
+      ),
       request(
         api.get("/reports/attendance", {
           params: {
@@ -81,10 +105,26 @@ export function ReportsPage({ businessType = "LABOUR" }) {
           },
         }),
       ),
+      request(
+        api.get("/dashboard/analytics", {
+          params: {
+            from,
+            to,
+            worker: attendanceWorker,
+            companyName: companyFilter,
+            teamName: teamFilter,
+            workZone: workZoneFilter,
+            skill: skillFilter,
+            kind: paymentKind,
+            method: paymentMethod,
+          },
+        }),
+      ),
     ])
-      .then(([operations, attendance]) => {
+      .then(([operations, attendance, analytics]) => {
         setData(operations);
         setAttendanceData(attendance);
+        setAnalyticsData(analytics);
         if (!attendanceWorker)
           setAttendanceWorkers(attendance.workerSummaries || []);
         setExpandedWorker("");
@@ -94,14 +134,15 @@ export function ReportsPage({ businessType = "LABOUR" }) {
   useEffect(() => {
     load();
   }, []);
+  useEffect(() => {
+    request(api.get("/workers", { params: { type } }))
+      .then(({ workers: result }) => setWorkerOptions(result || []))
+      .catch((err) => setError(errorMessage(err)));
+  }, [type]);
   const summary = data?.summary || {
-    billed: 0,
-    payout: 0,
     inflow: 0,
     outflow: 0,
     advance: 0,
-    profit: 0,
-    headCount: 0,
   };
   return (
     <div className={attendancePrintMode ? "attendance-print-root" : undefined}>
@@ -146,6 +187,74 @@ export function ReportsPage({ businessType = "LABOUR" }) {
               onChange={(event) => setTo(event.target.value)}
             />
           </Field>
+          <Field label="Worker">
+            <select
+              value={attendanceWorker}
+              onChange={(event) => setAttendanceWorker(event.target.value)}
+            >
+              <option value="">All workers</option>
+              {workerOptions.map((worker) => (
+                <option key={worker._id} value={worker._id}>
+                  {worker.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {[
+            ["Company", companyFilter, setCompanyFilter, "companyName"],
+            ["Team", teamFilter, setTeamFilter, "teamName"],
+            ["Location", workZoneFilter, setWorkZoneFilter, "workZone"],
+            ["Skill", skillFilter, setSkillFilter, "skill"],
+          ].map(([label, value, setter, field]) => (
+            <Field label={label} key={field}>
+              <select
+                value={value}
+                onChange={(event) => setter(event.target.value)}
+              >
+                <option value="">All {label.toLowerCase()}s</option>
+                {[
+                  ...new Set(
+                    workerOptions
+                      .map((worker) => worker[field])
+                      .filter(Boolean),
+                  ),
+                ]
+                  .sort()
+                  .map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          ))}
+          <Field label="Payment type">
+            <select
+              value={paymentKind}
+              onChange={(event) => setPaymentKind(event.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="WAGE">Wage</option>
+              <option value="ADVANCE">Advance</option>
+              <option value="TRAVEL_ADVANCE">Travel advance</option>
+              <option value="EXPENSE">Kharchi</option>
+              <option value="ADJUSTMENT">Adjustment</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </Field>
+          <Field label="Payment method">
+            <select
+              value={paymentMethod}
+              onChange={(event) => setPaymentMethod(event.target.value)}
+            >
+              <option value="">All methods</option>
+              <option value="CASH">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="BANK">Bank</option>
+              <option value="CHEQUE">Cheque</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </Field>
           <Button
             icon={RefreshCcw}
             className={`${styles["button-primary"]}`}
@@ -156,296 +265,326 @@ export function ReportsPage({ businessType = "LABOUR" }) {
         </div>
         <ErrorNote error={error} />
       </Panel>
-      <Panel
-        title="Attendance report"
-        detail="Compare every active labour worker across the selected period."
-        className="attendance-report-panel"
-        action={
-          <div className="attendance-print-action">
-            <Button
-              icon={Printer}
-              className={`${styles["button-secondary"]}`}
-              onClick={printAttendanceReport}
-              disabled={!attendanceData?.workerSummaries?.length}
-            >
-              Attendance PDF
-            </Button>
-          </div>
-        }
+      <div
+        className={`${styles["report-tabs"]}`}
+        role="tablist"
+        aria-label="Report sections"
       >
-        <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
-          <Field label="Labour">
-            <select
-              value={attendanceWorker}
-              onChange={(event) => setAttendanceWorker(event.target.value)}
-            >
-              <option value="">All labour</option>
-              {attendanceWorkers.map((worker) => (
-                <option key={worker.workerId} value={worker.workerId}>
-                  {worker.workerName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Button
-            icon={RefreshCcw}
-            className={`${styles["button-secondary"]}`}
-            onClick={load}
+        {[
+          ["ATTENDANCE", "Attendance"],
+          ["PAYROLL", "Payroll"],
+          ["WORKFORCE", "Workforce"],
+          ["EXCEPTIONS", "Exceptions"],
+          ["MANAGEMENT", "Management"],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={reportTab === value}
+            className={reportTab === value ? styles.active : ""}
+            onClick={() => setReportTab(value)}
           >
-            Apply attendance filter
-          </Button>
-        </div>
-        <div className={`${styles["table-wrap"]}`}>
-          <table>
-            <thead>
-              <tr>
-                <th>Worker</th>
-                <th>Present</th>
-                <th>2P</th>
-                <th>Absent</th>
-                <th>Half day</th>
-                <th>Leave</th>
-                <th>Not marked</th>
-                <th>Payable</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attendanceData?.workerSummaries?.map((worker) => {
-                const isExpanded = expandedWorker === worker.workerId;
-                return (
-                  <Fragment key={worker.workerId}>
-                    <tr>
-                      <td>
-                        <strong>{worker.workerName}</strong>
-                        <small>
-                          {worker.type === "PAINTER" ? "Painter" : "Labour"}
-                        </small>
-                      </td>
-                      <td>{worker.PRESENT}</td>
-                      <td>{worker.DOUBLE_PRESENT}</td>
-                      <td>{worker.ABSENT}</td>
-                      <td>{worker.HALF_DAY}</td>
-                      <td>{worker.LEAVE}</td>
-                      <td>{worker.NOT_MARKED}</td>
-                      <td>{money(worker.payable)}</td>
-                      <td>
-                        <button
-                          className={`${styles["icon-button"]}`}
-                          type="button"
-                          title={
-                            isExpanded
-                              ? "Hide daily details"
-                              : "Show daily details"
-                          }
-                          onClick={() =>
-                            setExpandedWorker(isExpanded ? "" : worker.workerId)
-                          }
-                        >
-                          {isExpanded ? (
-                            <ChevronUp size={16} />
-                          ) : (
-                            <ChevronDown size={16} />
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && (
+            {label}
+          </button>
+        ))}
+      </div>
+      {reportTab === "ATTENDANCE" && (
+        <Panel
+          title="Attendance report"
+          detail="Compare every active labour worker across the selected period."
+          className="attendance-report-panel"
+          action={
+            <div className="attendance-print-action">
+              <Button
+                icon={Printer}
+                className={`${styles["button-secondary"]}`}
+                onClick={printAttendanceReport}
+                disabled={!attendanceData?.workerSummaries?.length}
+              >
+                Attendance PDF
+              </Button>
+            </div>
+          }
+        >
+          <div className={`${styles["table-wrap"]}`}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Present</th>
+                  <th>2P</th>
+                  <th>Absent</th>
+                  <th>Half day</th>
+                  <th>Leave</th>
+                  <th>Not marked</th>
+                  <th>Payable</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceData?.workerSummaries?.map((worker) => {
+                  const isExpanded = expandedWorker === worker.workerId;
+                  return (
+                    <Fragment key={worker.workerId}>
                       <tr>
-                        <td colSpan="9">
-                          <div className={`${styles["table-wrap"]}`}>
-                            <table>
-                              <thead>
-                                <tr>
-                                  <th>Date</th>
-                                  <th>Status</th>
-                                  <th>Work units</th>
-                                  <th>Payable</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {worker.records.map((record) => (
-                                  <tr key={`${worker.workerId}-${record.date}`}>
-                                    <td>{date(record.date)}</td>
-                                    <td>
-                                      {record.status.replaceAll("_", " ")}
-                                    </td>
-                                    <td>{record.workUnits}</td>
-                                    <td>{money(record.payableAmount)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                        <td>
+                          <strong>{worker.workerName}</strong>
+                          <small>
+                            {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                          </small>
+                        </td>
+                        <td>{worker.PRESENT}</td>
+                        <td>{worker.DOUBLE_PRESENT}</td>
+                        <td>{worker.ABSENT}</td>
+                        <td>{worker.HALF_DAY}</td>
+                        <td>{worker.LEAVE}</td>
+                        <td>{worker.NOT_MARKED}</td>
+                        <td>{money(worker.payable)}</td>
+                        <td>
+                          <button
+                            className={`${styles["icon-button"]}`}
+                            type="button"
+                            title={
+                              isExpanded
+                                ? "Hide daily details"
+                                : "Show daily details"
+                            }
+                            onClick={() =>
+                              setExpandedWorker(
+                                isExpanded ? "" : worker.workerId,
+                              )
+                            }
+                          >
+                            {isExpanded ? (
+                              <ChevronUp size={16} />
+                            ) : (
+                              <ChevronDown size={16} />
+                            )}
+                          </button>
                         </td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {!attendanceData?.workerSummaries?.length && (
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan="9">
+                            <div className={`${styles["table-wrap"]}`}>
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th>Status</th>
+                                    <th>Work units</th>
+                                    <th>Payable</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {worker.records.map((record) => (
+                                    <tr
+                                      key={`${worker.workerId}-${record.date}`}
+                                    >
+                                      <td>{date(record.date)}</td>
+                                      <td>
+                                        {record.status.replaceAll("_", " ")}
+                                      </td>
+                                      <td>{record.workUnits}</td>
+                                      <td>{money(record.payableAmount)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                {!attendanceData?.workerSummaries?.length && (
+                  <tr>
+                    <td colSpan="9">
+                      <Empty title="No active labour for this filter" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      {reportTab === "PAYROLL" && (
+        <Panel title="Payment ledger" detail="Money paid to the workforce.">
+          <div className={`${styles["table-wrap"]}`}>
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan="9">
-                    <Empty title="No active labour for this filter" />
-                  </td>
+                  <th>Date</th>
+                  <th>Worker</th>
+                  <th>Type</th>
+                  <th>Amount</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data?.payments?.map((payment) => (
+                  <tr key={payment._id}>
+                    <td>{date(payment.paidOn)}</td>
+                    <td>{payment.worker?.name || "Business expense"}</td>
+                    <td>{payment.kind.replace("_", " ")}</td>
+                    <td className={`${styles["amount"]} ${styles["expense"]}`}>
+                      {money(payment.amount)}
+                    </td>
+                  </tr>
+                ))}
+                {!data?.payments?.length && (
+                  <tr>
+                    <td colSpan="4">
+                      <Empty title="No payments for this filter" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      {analyticsData && reportTab === "MANAGEMENT" && (
+        <>
+          <div
+            className={`${styles["metric-grid"]} ${styles["compact-metrics"]}`}
+          >
+            <Metric
+              label="Attendance rate"
+              value={`${analyticsData.kpis.attendanceRate}%`}
+              detail="Selected period"
+            />
+            <Metric
+              label="Period payable"
+              value={money(analyticsData.kpis.payable)}
+              detail={`${analyticsData.kpis.overtimeHours} OT hours`}
+              tone="amber"
+            />
+            <Metric
+              label="Period paid"
+              value={money(analyticsData.kpis.paid)}
+              detail="Payment records in range"
+              tone="blue"
+            />
+            <Metric
+              label="Lifetime due"
+              value={money(analyticsData.kpis.lifetimeDue)}
+              detail="Filtered workforce"
+              tone="coral"
+            />
+          </div>
+          <Panel
+            title="Management snapshot"
+            detail="The main operational numbers for the selected period."
+          >
+            <div className={`${styles["report-summary-grid"]}`}>
+              <div>
+                <span>Active workers</span>
+                <strong>{analyticsData.kpis.activeWorkers}</strong>
+              </div>
+              <div>
+                <span>Present entries</span>
+                <strong>{analyticsData.kpis.present}</strong>
+              </div>
+              <div>
+                <span>Unmarked entries</span>
+                <strong>{analyticsData.kpis.unmarked}</strong>
+              </div>
+              <div>
+                <span>Range</span>
+                <strong>
+                  {analyticsData.range.from} to {analyticsData.range.to}
+                </strong>
+              </div>
+            </div>
+          </Panel>
+        </>
+      )}
+      {analyticsData && reportTab === "WORKFORCE" && (
+        <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
+          {["company", "team", "workZone", "skill"].map((dimension) => (
+            <Panel
+              title={`${dimension === "workZone" ? "Location" : dimension} distribution`}
+              key={dimension}
+            >
+              <div className={`${styles["report-rank-list"]}`}>
+                {Object.entries(analyticsData.composition?.[dimension] || {})
+                  .sort((left, right) => right[1] - left[1])
+                  .map(([label, count]) => (
+                    <div key={label}>
+                      <strong>{label}</strong>
+                      <span>{count}</span>
+                    </div>
+                  ))}
+              </div>
+            </Panel>
+          ))}
         </div>
-      </Panel>
-      <div className={`${styles["metric-grid"]}`}>
-        <Metric
-          label="Client billing"
-          value={money(summary.billed)}
-          detail={`${number(summary.headCount)} people supplied`}
-          tone="teal"
-          icon={ReceiptText}
-        />
-        <Metric
-          label="Worker payout"
-          value={money(summary.payout)}
-          detail="Expected cost for listed work"
-          tone="coral"
-          icon={UsersRound}
-        />
-        <Metric
-          label="Cash received"
-          value={money(summary.inflow)}
-          detail="Recorded client receipts"
-          tone="purple"
-          icon={ArrowDownLeft}
-        />
-        <Metric
-          label="Estimated gross margin"
-          value={money(summary.profit)}
-          detail="Billing minus worker cost"
-          tone="amber"
-          icon={CircleDollarSign}
-        />
-      </div>
-      <Panel
-        title={
-          type === "PAINTER"
-            ? "Painter work supply report"
-            : "Labour work supply report"
-        }
-        detail={
-          type === "PAINTER"
-            ? "Every saved painter assignment in the selected period."
-            : "Every saved labour assignment in the selected period."
-        }
-      >
-        <div className={`${styles["table-wrap"]}`}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Worker</th>
-                <th>Client / site</th>
-                <th>People × days</th>
-                <th>Billing</th>
-                <th>Payout</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.assignments?.map((record) => (
-                <tr key={record._id}>
-                  <td>{date(record.startDate)}</td>
-                  <td>
-                    <Status tone={typeClass(record.type)}>
-                      {typeTitle(record.type)}
-                    </Status>
-                  </td>
-                  <td>{record.worker?.name}</td>
-                  <td>
-                    <strong>{record.client?.name}</strong>
-                    <small>{record.siteName}</small>
-                  </td>
-                  <td>
-                    {record.headCount} × {record.workDays}
-                  </td>
-                  <td className={`${styles["amount"]} ${styles["income"]}`}>
-                    {money(record.billingAmount)}
-                  </td>
-                  <td className={`${styles["amount"]}`}>
-                    {money(record.payoutAmount)}
-                  </td>
-                  <td>
-                    <Status
-                      tone={record.status === "ACTIVE" ? "blue" : "neutral"}
-                    >
-                      {record.status}
-                    </Status>
-                  </td>
-                </tr>
-              ))}
-              {!data?.assignments?.length && (
+      )}
+      {analyticsData && reportTab === "EXCEPTIONS" && (
+        <Panel
+          title="Attendance exceptions"
+          detail="Workers needing follow-up in the selected period."
+        >
+          <div className={`${styles["table-wrap"]}`}>
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan="8">
-                    <Empty
-                      title="No work for this filter"
-                      detail="Try a wider date range or create a work record."
-                    />
-                  </td>
+                  <th>Worker</th>
+                  <th>Unmarked</th>
+                  <th>Absent</th>
+                  <th>Leave</th>
+                  <th>Half day</th>
+                  <th>OT hours</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-      <Panel
-        title="Payment ledger"
-        detail="Money received from clients and paid to the workforce."
-      >
-        <div className={`${styles["table-wrap"]}`}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Counterparty</th>
-                <th>Type</th>
-                <th>Flow</th>
-                <th>Work record</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.payments?.map((payment) => (
-                <tr key={payment._id}>
-                  <td>{date(payment.paidOn)}</td>
-                  <td>
-                    {payment.client?.name ||
-                      payment.worker?.name ||
-                      "Business expense"}
-                  </td>
-                  <td>{payment.kind.replace("_", " ")}</td>
-                  <td>
-                    <Status tone={payment.flow === "INFLOW" ? "teal" : "coral"}>
-                      {payment.flow === "INFLOW" ? "Received" : "Paid"}
-                    </Status>
-                  </td>
-                  <td>{payment.assignment?.siteName || "—"}</td>
-                  <td
-                    className={`${styles["amount"]} ${styles[payment.flow === "INFLOW" ? "income" : "expense"]}`}
-                  >
-                    {money(payment.amount)}
-                  </td>
-                </tr>
-              ))}
-              {!data?.payments?.length && (
-                <tr>
-                  <td colSpan="6">
-                    <Empty title="No payments for this filter" />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+              </thead>
+              <tbody>
+                {analyticsData.exceptions?.map((item) => (
+                  <tr key={item.workerId}>
+                    <td>
+                      <strong>{item.workerName}</strong>
+                    </td>
+                    <td>{item.notMarked}</td>
+                    <td>{item.absent}</td>
+                    <td>{item.leave}</td>
+                    <td>{item.halfDay}</td>
+                    <td>{item.overtimeHours}</td>
+                  </tr>
+                ))}
+                {!analyticsData.exceptions?.length && (
+                  <tr>
+                    <td colSpan="6">
+                      <Empty title="No attendance exceptions" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      {analyticsData && reportTab === "PAYROLL" && (
+        <Panel
+          title="Payment summary"
+          detail="Payment type totals for the selected period."
+        >
+          <div className={`${styles["report-summary-grid"]}`}>
+            {Object.entries(analyticsData.paymentKinds || {}).map(
+              ([kind, amount]) => (
+                <div key={kind}>
+                  <span>{kind.replaceAll("_", " ")}</span>
+                  <strong>{money(amount)}</strong>
+                </div>
+              ),
+            )}
+            {!Object.keys(analyticsData.paymentKinds || {}).length && (
+              <Empty title="No payments in this period" />
+            )}
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }

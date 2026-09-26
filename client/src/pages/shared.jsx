@@ -39,7 +39,7 @@ export function SectionTabs({ value, onChange, showAttendance = false }) {
         className={value === "LABOUR" ? styles.active : ""}
         onClick={() => onChange("LABOUR")}
       >
-        Labour supply
+        Labour
       </button>
       {showAttendance && (
         <button

@@ -8,12 +8,6 @@ const attendanceSheetSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    assignment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Assignment",
-      default: null,
-      index: true,
-    },
     date: { type: Date, required: true, index: true },
     locked: { type: Boolean, default: false },
     lockedAt: { type: Date, default: null },
@@ -26,9 +20,6 @@ const attendanceSheetSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-attendanceSheetSchema.index(
-  { type: 1, assignment: 1, date: 1 },
-  { unique: true },
-);
+attendanceSheetSchema.index({ type: 1, date: 1 }, { unique: true });
 
 export default mongoose.model("AttendanceSheet", attendanceSheetSchema);

@@ -112,6 +112,76 @@
 .worker-checkboxes input {
   width: auto;
 }
+.report-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 18px 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.report-tabs button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.report-tabs button:hover,
+.report-tabs button.active {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.report-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.report-summary-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #edf2f0;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+.report-summary-grid span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.report-summary-grid strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+.report-rank-list {
+  display: grid;
+  gap: 10px;
+}
+.report-rank-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #edf2f0;
+  font-size: 12px;
+}
+.report-rank-list > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.report-rank-list span {
+  min-width: 28px;
+  padding: 3px 7px;
+  border-radius: 99px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  text-align: center;
+  font-weight: 700;
+}
 .amount {
   text-align: right;
   font-family: "DM Mono", monospace;
@@ -495,6 +565,23 @@
 .worker-picker {
   position: relative;
 }
+.payment-worker-due {
+  display: grid;
+  gap: 2px;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border: 1px solid #b8ded7;
+  border-radius: 8px;
+  background: #effaf7;
+  color: var(--teal);
+}
+.payment-worker-due strong {
+  font-size: 12px;
+}
+.payment-worker-due small {
+  color: var(--muted);
+  font-size: 10px;
+}
 .worker-picker-results {
   position: absolute;
   z-index: 5;
@@ -656,8 +743,8 @@
 }
 .monthly-cell {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 52px;
+  height: 34px;
   place-items: center;
   padding: 0;
   border: 1px solid var(--line);
@@ -666,6 +753,19 @@
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+  caret-color: var(--teal);
+  cursor: text;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.monthly-cell:focus {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-soft);
 }
 .monthly-cell:disabled {
   cursor: not-allowed;

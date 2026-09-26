@@ -3,15 +3,12 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import authRoutes from "./routes/auth.js";
-import clientRoutes from "./routes/clients.js";
 import workerRoutes from "./routes/workers.js";
 import attendanceRoutes from "./routes/attendance.js";
-import assignmentRoutes from "./routes/assignments.js";
 import paymentRoutes from "./routes/payments.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import reportRoutes from "./routes/reports.js";
 import companyProfileRoutes from "./routes/companyProfile.js";
-import dailyEntryRoutes from "./routes/dailyEntries.js";
 import expenseCategoryRoutes from "./routes/expenseCategories.js";
 import { requireAuth } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
@@ -35,10 +32,12 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    if (
+    const isDevelopmentOrigin =
       !isProduction &&
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-    ) {
+      /^https?:\/\/(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(:\d+)?$/.test(
+        origin,
+      );
+    if (isDevelopmentOrigin) {
       return callback(null, true);
     }
 
@@ -63,13 +62,10 @@ app.get("/api/health", (_req, res) =>
 );
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", requireAuth, dashboardRoutes);
-app.use("/api/clients", requireAuth, clientRoutes);
 app.use("/api/workers", requireAuth, workerRoutes);
 app.use("/api/attendance", requireAuth, attendanceRoutes);
-app.use("/api/assignments", requireAuth, assignmentRoutes);
 app.use("/api/payments", requireAuth, paymentRoutes);
 app.use("/api/company-profile", requireAuth, companyProfileRoutes);
-app.use("/api/daily-entries", requireAuth, dailyEntryRoutes);
 app.use("/api/expense-categories", requireAuth, expenseCategoryRoutes);
 app.use("/api/reports", requireAuth, reportRoutes);
 app.use(notFound);

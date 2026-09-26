@@ -21,11 +21,18 @@ function assertCloudinaryConfig() {
   });
 }
 
+const imageOptimization = [{ quality: "auto:best", fetch_format: "auto" }];
+
 export function uploadImage(buffer, folder, options = {}) {
   assertCloudinaryConfig();
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: "image", ...options },
+      {
+        folder,
+        resource_type: "image",
+        transformation: imageOptimization,
+        ...options,
+      },
       (error, result) => (error ? reject(error) : resolve(result)),
     );
     stream.end(buffer);
@@ -49,5 +56,16 @@ export function authenticatedImageUrl(publicId) {
     resource_type: "image",
     type: "authenticated",
     sign_url: true,
+    transformation: imageOptimization,
+  });
+}
+
+export function optimizedImageUrl(publicId) {
+  if (!publicId) return "";
+  assertCloudinaryConfig();
+  return cloudinary.url(publicId, {
+    secure: true,
+    resource_type: "image",
+    transformation: imageOptimization,
   });
 }

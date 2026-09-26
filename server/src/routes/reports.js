@@ -1,5 +1,4 @@
 import { Router } from "express";
-import Assignment from "../models/Assignment.js";
 import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
 import Worker from "../models/Worker.js";
@@ -11,30 +10,21 @@ const router = Router();
 router.get(
   "/operations",
   asyncHandler(async (req, res) => {
-    const assignmentFilter = {};
     const paymentFilter = {};
-    assignmentFilter.type = "LABOUR";
-    if (req.query.status) assignmentFilter.status = req.query.status;
-    if (req.query.worker) assignmentFilter.worker = req.query.worker;
-    if (req.query.client) assignmentFilter.client = req.query.client;
-    if (req.query.worker) paymentFilter.worker = req.query.worker;
-    if (req.query.client) paymentFilter.client = req.query.client;
-    const range = dateRange(req.query);
-    if (range) {
-      assignmentFilter.startDate = range;
-      paymentFilter.paidOn = range;
+    const workerFilter = { type: req.query.type || "LABOUR" };
+    for (const field of ["companyName", "teamName", "workZone", "skill"]) {
+      if (req.query[field]) workerFilter[field] = req.query[field];
     }
-    const [assignments, payments] = await Promise.all([
-      Assignment.find(assignmentFilter)
-        .populate("worker", "name type")
-        .populate("client", "name")
-        .sort({ startDate: -1 }),
-      Payment.find(paymentFilter)
-        .populate("worker", "name type")
-        .populate("client", "name")
-        .populate("assignment", "siteName")
-        .sort({ paidOn: -1 }),
-    ]);
+    if (req.query.worker) workerFilter._id = req.query.worker;
+    const scopedWorkers = await Worker.find(workerFilter).select("_id");
+    paymentFilter.worker = { $in: scopedWorkers.map((worker) => worker._id) };
+    if (req.query.kind) paymentFilter.kind = req.query.kind;
+    if (req.query.method) paymentFilter.method = req.query.method;
+    const range = dateRange(req.query);
+    if (range) paymentFilter.paidOn = range;
+    const payments = await Payment.find(paymentFilter)
+      .populate("worker", "name type")
+      .sort({ paidOn: -1 });
     const paymentSummaries = payments.reduce(
       (summary, payment) => {
         summary.inflow += payment.flow === "INFLOW" ? payment.amount : 0;
@@ -44,22 +34,10 @@ router.get(
       },
       { inflow: 0, outflow: 0, advance: 0 },
     );
-    const workSummaries = assignments.reduce(
-      (summary, assignment) => {
-        summary.billed += assignment.billingAmount;
-        summary.payout += assignment.payoutAmount;
-        summary.headCount += assignment.headCount;
-        return summary;
-      },
-      { billed: 0, payout: 0, headCount: 0 },
-    );
     res.json({
-      assignments,
       payments,
       summary: {
         ...paymentSummaries,
-        ...workSummaries,
-        profit: workSummaries.billed - workSummaries.payout,
       },
     });
   }),
@@ -80,26 +58,24 @@ router.get(
         .toISOString()
         .slice(0, 10);
     const workerFilter = { active: true, type };
+    for (const field of ["companyName", "teamName", "workZone", "skill"]) {
+      if (req.query[field]) workerFilter[field] = req.query[field];
+    }
     if (req.query.worker) workerFilter._id = req.query.worker;
-    const [workers, attendance] = await Promise.all([
-      Worker.find(workerFilter).sort({ name: 1 }),
-      Attendance.find({
-        ...(type === "ALL" ? {} : { type }),
-        ...(req.query.worker ? { worker: req.query.worker } : {}),
-        date: {
-          $gte: new Date(`${from}T00:00:00.000Z`),
-          $lte: new Date(`${to}T23:59:59.999Z`),
-        },
-      })
-        .populate("worker", "name type")
-        .populate("assignment", "siteName workDescription"),
-    ]);
+    const workers = await Worker.find(workerFilter).sort({ name: 1 });
+    const attendance = await Attendance.find({
+      ...(type === "ALL" ? {} : { type }),
+      worker: { $in: workers.map((worker) => worker._id) },
+      date: {
+        $gte: new Date(`${from}T00:00:00.000Z`),
+        $lte: new Date(`${to}T23:59:59.999Z`),
+      },
+    }).populate("worker", "name type");
 
     const rows = attendance.map((item) => ({
       id: item._id,
       worker: item.worker?.name,
       type: item.type,
-      assignment: item.assignment?.siteName || "—",
       date: item.date,
       status: item.status,
       workUnits: item.workUnits,
