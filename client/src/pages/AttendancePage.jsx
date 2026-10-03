@@ -1,20 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   CheckCircle2,
   Clock3,
   Coffee,
   Copy,
+  FileDown,
   Lock,
-  Printer,
   Save,
   XCircle,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
 import companyLogo from "../assets/image.png";
 import { money } from "../utils/formatters.js";
-import { ErrorNote, SectionTabs, errorMessage } from "./shared.jsx";
+import { ErrorNote, errorMessage } from "./shared.jsx";
 import {
   Empty,
   Field,
@@ -36,16 +35,8 @@ const statusMeta = {
 
 const defaultDate = () => new Date().toISOString().slice(0, 10);
 const defaultMonth = () => defaultDate().slice(0, 7);
-const monthLabel = (monthValue) => {
-  if (!monthValue) return "";
-  const [year, month] = monthValue.split("-");
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-  }).format(date);
-};
-function MonthlyAttendance({ businessType }) {
+function MonthlyAttendance() {
+  const businessType = "LABOUR";
   const [month, setMonth] = useState(defaultMonth());
   const [data, setData] = useState({
     workers: [],
@@ -63,10 +54,16 @@ function MonthlyAttendance({ businessType }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [attendancePrintMode, setAttendancePrintMode] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [error, setError] = useState("");
   const [companyProfile, setCompanyProfile] = useState(null);
   const containerRef = useRef(null);
+
+  useEffect(() => {
+    request(api.get("/company-profile"))
+      .then(({ profile }) => setCompanyProfile(profile || null))
+      .catch((err) => setError(errorMessage(err)));
+  }, []);
 
   const handleGridKeyDown = (event) => {
     if (event.target.tagName !== "INPUT") return;
@@ -101,18 +98,6 @@ function MonthlyAttendance({ businessType }) {
       nextInput.select();
     }
   };
-
-  useEffect(() => {
-    const handleAfterPrint = () => setAttendancePrintMode(false);
-    window.addEventListener("afterprint", handleAfterPrint);
-    return () => window.removeEventListener("afterprint", handleAfterPrint);
-  }, []);
-
-  useEffect(() => {
-    request(api.get("/company-profile"))
-      .then(({ profile }) => setCompanyProfile(profile || null))
-      .catch(() => setCompanyProfile(null));
-  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -320,30 +305,87 @@ function MonthlyAttendance({ businessType }) {
     }
   };
 
-  const printAttendanceReport = () => {
-    setAttendancePrintMode(true);
-    window.setTimeout(() => window.print(), 0);
+  const downloadAttendancePdf = async () => {
+    setGeneratingPdf(true);
+    setError("");
+    try {
+      const selectedWorkers = data.workers.filter(workerMatches);
+      const pdfWorkers = selectedWorkers.map((worker, index) => {
+        let normalDays = 0;
+        let overtimeHours = 0;
+        const attendance = Array.from({ length: 31 }, (_, dayIndex) => {
+          const day = dayIndex + 1;
+          if (day > data.days) return "";
+          const dateKey = `${month}-${String(day).padStart(2, "0")}`;
+          if (dateKey < periodStart || dateKey > periodEnd) return "";
+          const cell = cellFor(worker._id, day);
+          normalDays +=
+            cell.status === "DOUBLE_PRESENT"
+              ? 2
+              : cell.status === "PRESENT"
+                ? 1
+                : cell.status === "HALF_DAY"
+                  ? 0.5
+                  : 0;
+          overtimeHours += Number(cell.overtimeHours || 0);
+          return codeFor(cell);
+        });
+        const totalDays = normalDays + overtimeHours / 8;
+        return {
+          serialNumber: index + 1,
+          workerName: worker.name,
+          company: worker.companyName,
+          location: worker.workZone,
+          attendance,
+          totalDH: `${Number(normalDays.toFixed(3))} + ${Number(overtimeHours.toFixed(3))}`,
+          totalDays: totalDays.toFixed(3),
+          totalDaysValue: totalDays,
+        };
+      });
+      const selectedWorker = selectedWorkers.find(
+        (worker) => worker._id === periodWorker,
+      );
+      const { generateAttendancePdf } = await import(
+        "../utils/attendancePdf.js"
+      );
+      await generateAttendancePdf({
+        month,
+        team: periodTeam || selectedWorker?.teamName || "ALL TEAMS",
+        companyName:
+          periodCompany || companyProfile?.companyName || "Company Name",
+        workers: pdfWorkers,
+        profileLogoUrl: companyProfile?.logoUrl,
+        fallbackLogoUrl: companyLogo,
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setGeneratingPdf(false);
+    }
   };
 
   return (
-    <div className={attendancePrintMode ? "attendance-pdf-root" : undefined}>
+    <>
       <PageHeader
         eyebrow="ATTENDANCE"
         title="Monthly attendance"
         detail="Enter P, A, P+P, P+P+1, L, H or P+1 directly in each day cell."
       />
       <Panel
-        title={`${businessType === "PAINTER" ? "Painter" : "Labour"} monthly grid`}
+        title="Labour monthly grid"
         detail={`${data.workers.length} active workers · ${data.locked ? "Locked" : "Open"}`}
         action={
           <div className={`${styles["actions-inline"]}`}>
             <button
               className={`${styles["button-secondary"]}`}
-              onClick={printAttendanceReport}
-              disabled={loading || !data.workers.filter(workerMatches).length}
+              onClick={downloadAttendancePdf}
+              disabled={
+                generatingPdf || loading || !data.workers.filter(workerMatches).length
+              }
               type="button"
             >
-              <Printer size={15} /> Attendance PDF
+              <FileDown size={15} />{" "}
+              {generatingPdf ? "Generating PDF…" : "Generate PDF"}
             </button>
             <button
               className={`${styles["button-primary"]}`}
@@ -541,7 +583,7 @@ function MonthlyAttendance({ businessType }) {
                     <td>
                       <strong>{worker.name}</strong>
                       <small>
-                        {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                        Labour
                       </small>
                     </td>
                     {Array.from({ length: data.days }, (_, index) => {
@@ -582,130 +624,11 @@ function MonthlyAttendance({ businessType }) {
           </div>
         )}
       </Panel>
-      {attendancePrintMode && (
-        <Panel
-          title="Attendance PDF"
-          detail={`${month} · ${data.workers.filter(workerMatches).length} workers`}
-          className="attendance-pdf-panel"
-        >
-          <div className="attendance-pdf-header">
-            <div className="attendance-pdf-brand">
-              <img
-                src={companyProfile?.logoUrl || companyLogo}
-                alt={companyProfile?.companyName || "Company logo"}
-              />
-              <div>
-                <h2>{companyProfile?.companyName || "Company Name"}</h2>
-                <p>{companyProfile?.address || "Address"}</p>
-                <p>
-                  {companyProfile?.mobile || ""}
-                  {companyProfile?.mobile && companyProfile?.email ? " | " : ""}
-                  {companyProfile?.email || ""}
-                </p>
-              </div>
-            </div>
-            <div className="attendance-pdf-month">{monthLabel(month)}</div>
-          </div>
-          <div className={`${styles["table-wrap"]}`}>
-            <table className={`${styles["attendance-pdf-table"]}`}>
-              <thead>
-                <tr>
-                  <th>SR.NO</th>
-                  <th>WORKERS NAME</th>
-                  <th>COMPANY</th>
-                  <th>LOCATION</th>
-                  {Array.from({ length: data.days }, (_, index) => (
-                    <th key={index + 1}>{index + 1}</th>
-                  ))}
-                  <th>
-                    TOTAL
-                    <br />
-                    (D + H)
-                  </th>
-                  <th>
-                    TOTAL
-                    <br />
-                    DAYS
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.workers.filter(workerMatches).map((worker, index) => {
-                  let normalDays = 0;
-                  let overtimeHours = 0;
-                  const dayCodes = Array.from(
-                    { length: data.days },
-                    (_, dayIndex) => {
-                      const day = dayIndex + 1;
-                      const cell = cellFor(worker._id, day);
-                      const dateKey = `${month}-${String(day).padStart(2, "0")}`;
-                      const inRange =
-                        dateKey >= periodStart && dateKey <= periodEnd;
-                      if (inRange) {
-                        normalDays +=
-                          cell.status === "DOUBLE_PRESENT"
-                            ? 2
-                            : cell.status === "PRESENT"
-                              ? 1
-                              : cell.status === "HALF_DAY"
-                                ? 0.5
-                                : 0;
-                        overtimeHours += Number(cell.overtimeHours || 0);
-                      }
-                      return codeFor(cell);
-                    },
-                  );
-                  const totalDays = totalDaysFor(worker);
-                  const displayNumber = (value) =>
-                    Number(value.toFixed(2)).toString();
-                  return (
-                    <tr key={worker._id}>
-                      <td>{index + 1}</td>
-                      <td>{worker.name}</td>
-                      <td>{worker.companyName || "-"}</td>
-                      <td>{worker.workZone || "-"}</td>
-                      {dayCodes.map((code, dayIndex) => {
-                        const day = dayIndex + 1;
-                        const inRange =
-                          day >= Number(periodStart.slice(-2)) &&
-                          day <= Number(periodEnd.slice(-2));
-                        return <td key={day}>{inRange ? code : ""}</td>;
-                      })}
-                      <td>
-                        {displayNumber(normalDays)} +{" "}
-                        {displayNumber(overtimeHours)} OT hrs
-                      </td>
-                      <td>{displayNumber(totalDays)}</td>
-                    </tr>
-                  );
-                })}
-                <tr>
-                  <td colSpan={data.days + 5}>
-                    <strong>AGGREGATE TOTAL DAYS</strong>
-                  </td>
-                  <td>
-                    {data.workers
-                      .filter(workerMatches)
-                      .reduce(
-                        (total, worker) => total + totalDaysFor(worker),
-                        0,
-                      )
-                      .toFixed(2)
-                      .replace(/\.00$/, "")}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      )}
-    </div>
+    </>
   );
 }
 
-export function AttendancePage({ businessType = "LABOUR" }) {
-  const navigate = useNavigate();
-  const workerType = businessType;
+export function AttendancePage() {
   const [date, setDate] = useState(defaultDate());
   const [workers, setWorkers] = useState([]);
   const [summary, setSummary] = useState({
@@ -752,10 +675,7 @@ export function AttendancePage({ businessType = "LABOUR" }) {
 
   const load = async () => {
     try {
-      const params = {
-        date,
-        ...(workerType !== "ALL" ? { type: workerType } : {}),
-      };
+      const params = { date, type: "LABOUR" };
       const attendanceData = await request(api.get("/attendance", { params }));
       const {
         workers: result,
@@ -785,7 +705,7 @@ export function AttendancePage({ businessType = "LABOUR" }) {
   useEffect(() => {
     setError("");
     load();
-  }, [workerType, date]);
+  }, [date]);
 
   const filteredWorkers = useMemo(
     () =>
@@ -796,11 +716,6 @@ export function AttendancePage({ businessType = "LABOUR" }) {
       ),
     [workers, search],
   );
-
-  const changeWorkforceTab = (nextTab) => {
-    if (nextTab === "ATTENDANCE") return;
-    navigate(`/${nextTab.toLowerCase()}/workers`);
-  };
 
   const updateStatus = async (workerId, nextStatus) => {
     if (!canEdit || locked) return;
@@ -905,7 +820,7 @@ export function AttendancePage({ businessType = "LABOUR" }) {
   };
 
   if (view === "monthly") {
-    return <MonthlyAttendance businessType={workerType} />;
+    return <MonthlyAttendance />;
   }
 
   return (
@@ -1024,7 +939,7 @@ export function AttendancePage({ businessType = "LABOUR" }) {
                     <td className={`${styles["attendance-worker"]}`}>
                       <strong>{worker.name}</strong>
                       <small>
-                        {worker.type === "PAINTER" ? "Painter" : "Labour"} ·{" "}
+                        Labour ·{" "}
                         {worker.teamName ? `${worker.teamName} · ` : ""}
                         {worker.phone || "No phone"} ·{" "}
                         {worker.dailyRate

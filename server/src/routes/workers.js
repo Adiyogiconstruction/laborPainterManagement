@@ -7,6 +7,7 @@ import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { parseWorkerSearch } from "../utils/workerSearch.js";
+import { appendWorkerStatusTransition } from "../utils/workerStatusHistory.js";
 import multer from "multer";
 import {
   authenticatedImageUrl,
@@ -229,7 +230,14 @@ router.post(
         "Worker type, name, phone, Aadhaar, address, skill, daily rate and joining date are required.",
       );
     }
-    const worker = await Worker.create(data);
+    const worker = new Worker(data);
+    worker.statusHistory = [
+      {
+        active: worker.active,
+        changedAt: worker.joiningDate,
+      },
+    ];
+    await worker.save();
     await recordAdminActivity(
       req,
       "CREATE",
@@ -267,15 +275,22 @@ router.patch(
         "Worker type, name, phone, Aadhaar, address, skill, daily rate and joining date are required.",
       );
     }
-    const worker = await Worker.findByIdAndUpdate(
-      req.params.id,
-      { ...normalizeWorkerFields(pick(req.body, editable)), type: "LABOUR" },
-      { new: true, runValidators: true },
-    );
+    const updates = normalizeWorkerFields(pick(req.body, editable));
+    const previousStatus = existing.active ?? true;
+    existing.set({ ...updates, type: "LABOUR" });
+    const nextStatus = existing.active ?? true;
+    if (nextStatus !== previousStatus) {
+      existing.statusHistory = appendWorkerStatusTransition(
+        existing.statusHistory,
+        previousStatus,
+        nextStatus,
+      );
+    }
+    const worker = await existing.save();
     await recordAdminActivity(
       req,
       "UPDATE",
-      `${req.user.name} updated worker profile for ${worker.name}.`,
+      `${req.user.name} updated worker profile for ${worker.name}${nextStatus !== previousStatus ? ` and changed status to ${nextStatus ? "Active" : "Inactive"}` : ""}.`,
       { workerId: worker.id, section: "workers" },
     );
     res.json({ worker });
@@ -360,6 +375,51 @@ router.delete(
       { workerId: worker.id, section: "workers" },
     );
     res.json({ deletedId: worker.id });
+  }),
+);
+
+router.get(
+  "/:id/registration",
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
+    if (!worker) throw new ApiError(404, "Labour record not found.");
+
+    const workerData = worker.toObject();
+    const registrationWorker = pick(workerData, [
+      "_id",
+      "name",
+      "companyName",
+      "teamName",
+      "phone",
+      "aadhaarNumber",
+      "address",
+      "skill",
+      "workZone",
+      "photoPath",
+      "photoUrl",
+      "aadhaarFrontPath",
+      "aadhaarBackPath",
+      "ppeKitIssuedOn",
+      "joiningDate",
+    ]);
+    if (workerData.aadhaarFrontPublicId) {
+      registrationWorker.aadhaarFrontPath = authenticatedImageUrl(
+        workerData.aadhaarFrontPublicId,
+      );
+    } else if (workerData.aadhaarFrontUrl) {
+      registrationWorker.aadhaarFrontPath = workerData.aadhaarFrontUrl;
+    }
+    if (workerData.aadhaarBackPublicId) {
+      registrationWorker.aadhaarBackPath = authenticatedImageUrl(
+        workerData.aadhaarBackPublicId,
+      );
+    } else if (workerData.aadhaarBackUrl) {
+      registrationWorker.aadhaarBackPath = workerData.aadhaarBackUrl;
+    }
+    res.json({ worker: registrationWorker });
   }),
 );
 

@@ -1,6 +1,6 @@
 import styles from "../styles/design.module.css";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
 import companyLogo from "../assets/image.png";
+import "@fontsource/noto-sans-devanagari/400.css";
 import { date, inputDate, money, number } from "../utils/formatters.js";
 import {
   AddButton,
@@ -40,9 +41,7 @@ import {
 import {
   ErrorNote,
   Metric,
-  SectionTabs,
   errorMessage,
-  typeClass,
   typeTitle,
 } from "./shared.jsx";
 
@@ -313,10 +312,10 @@ function printWorkerOnboardingCompact(worker, profile) {
   };
 }
 
-function WorkerForm({ type, initial, onClose, onSaved }) {
+function WorkerForm({ initial, onClose, onSaved }) {
   const [form, setForm] = useState(
     initial || {
-      type,
+      type: "LABOUR",
       name: "",
       companyName: "",
       teamName: "",
@@ -391,7 +390,7 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
   };
   return (
     <Modal
-      title={`${initial ? "Edit" : "Add"} ${typeTitle(type)}`}
+      title={`${initial ? "Edit" : "Add"} ${typeTitle()}`}
       onClose={onClose}
       wide
     >
@@ -415,15 +414,13 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
             placeholder="Company name"
           />
         </Field>
-        {type === "LABOUR" && (
-          <Field label="Labour team" hint="Optional">
-            <input
-              value={form.teamName || ""}
-              onChange={update("teamName")}
-              placeholder="e.g. Team A or Ramesh crew"
-            />
-          </Field>
-        )}
+        <Field label="Labour team" hint="Optional">
+          <input
+            value={form.teamName || ""}
+            onChange={update("teamName")}
+            placeholder="e.g. Team A or Ramesh crew"
+          />
+        </Field>
         <Field label="Mobile number" hint="Required">
           <input
             required
@@ -448,9 +445,7 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
             required
             value={form.skill || ""}
             onChange={update("skill")}
-            placeholder={
-              type === "PAINTER" ? "e.g. Wall painter" : "e.g. Mason helper"
-            }
+            placeholder="e.g. Mason helper"
           />
         </Field>
         <Field label="Current work zone">
@@ -586,7 +581,7 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
             className={`${styles["button-primary"]}`}
             loading={saving}
           >
-            Save {typeTitle(type)}
+            Save {typeTitle()}
           </Button>
         </div>
       </form>
@@ -597,8 +592,11 @@ function WorkerForm({ type, initial, onClose, onSaved }) {
 function WorkerHistory({ worker, onClose }) {
   const [data, setData] = useState();
   const [companyProfile, setCompanyProfile] = useState();
+  const [companyProfileLoaded, setCompanyProfileLoaded] = useState(false);
+  const [companyProfileError, setCompanyProfileError] = useState("");
   const [error, setError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [registrationGenerating, setRegistrationGenerating] = useState(false);
   const [month, setMonth] = useState(() =>
     new Date().toISOString().slice(0, 7),
   );
@@ -608,26 +606,29 @@ function WorkerHistory({ worker, onClose }) {
   const [allTime, setAllTime] = useState(false);
   const [attendancePage, setAttendancePage] = useState(1);
   const attendanceLimit = 10;
+  const statusPeriods = Array.isArray(worker.statusHistory)
+    ? worker.statusHistory
+        .map((period, index, periods) => ({
+          ...period,
+          endAt: periods[index + 1]?.changedAt || null,
+        }))
+        .filter((period) => period.changedAt || period.endAt)
+    : [];
   useEffect(() => {
     let active = true;
     setHistoryLoading(true);
     setError("");
-    Promise.all([
-      request(
-        api.get(`/workers/${worker._id}/history`, {
-          params: {
-            ...(allTime ? {} : period),
-            attendancePage,
-            attendanceLimit,
-          },
-        }),
-      ),
-      request(api.get("/company-profile")),
-    ])
-      .then(([historyData, profileData]) => {
-        if (!active) return;
-        setData(historyData);
-        setCompanyProfile(profileData.profile);
+    request(
+      api.get(`/workers/${worker._id}/history`, {
+        params: {
+          ...(allTime ? {} : period),
+          attendancePage,
+          attendanceLimit,
+        },
+      }),
+    )
+      .then((historyData) => {
+        if (active) setData(historyData);
       })
       .catch((err) => {
         if (active) setError(errorMessage(err));
@@ -639,6 +640,28 @@ function WorkerHistory({ worker, onClose }) {
       active = false;
     };
   }, [worker._id, period, allTime, attendancePage]);
+  useEffect(() => {
+    let active = true;
+    request(api.get("/company-profile"))
+      .then(({ profile }) => {
+        if (active) {
+          setCompanyProfile(profile);
+          setCompanyProfileError("");
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setCompanyProfile(null);
+          setCompanyProfileError(errorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (active) setCompanyProfileLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const changeMonth = (event) => {
     const nextMonth = event.target.value;
     setMonth(nextMonth);
@@ -650,6 +673,27 @@ function WorkerHistory({ worker, onClose }) {
     setAllTime((current) => !current);
     setAttendancePage(1);
   };
+  const generateRegistrationPdf = async () => {
+    setRegistrationGenerating(true);
+    setError("");
+    try {
+      const { worker: registrationWorker } = await request(
+        api.get(`/workers/${worker._id}/registration`),
+      );
+      const { downloadRegistrationPdf } = await import(
+        "../utils/registrationPdf.js"
+      );
+      await downloadRegistrationPdf({
+        worker: registrationWorker,
+        profile: companyProfile,
+        logoUrl: companyLogo,
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setRegistrationGenerating(false);
+    }
+  };
   return (
     <Modal
       title={`${worker.name} · History`}
@@ -657,16 +701,17 @@ function WorkerHistory({ worker, onClose }) {
       wide
       action={
         <Button
-          icon={Printer}
+          icon={Download}
           className={`${styles["button-secondary"]}`}
-          disabled={!data || !companyProfile}
-          onClick={() => printWorkerOnboardingCompact(worker, companyProfile)}
+          loading={registrationGenerating}
+          disabled={!worker || !companyProfileLoaded}
+          onClick={generateRegistrationPdf}
         >
-          PDF
+          Generate Registration PDF
         </Button>
       }
     >
-      <ErrorNote error={error} />
+      <ErrorNote error={error || companyProfileError} />
       <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
         <Field label="History month">
           <input type="month" value={month} onChange={changeMonth} />
@@ -741,6 +786,47 @@ function WorkerHistory({ worker, onClose }) {
                   <figcaption>Aadhaar {label}</figcaption>
                 </figure>
               ))}
+            </div>
+          </Panel>
+          <Panel
+            title="Employment status periods"
+            detail="Recorded active and inactive periods for this labour."
+          >
+            <div className={`${styles["status-periods"]}`}>
+              <div className={`${styles["status-period-current"]}`}>
+                Current status:
+                <Status tone={worker.active ? "teal" : "neutral"}>
+                  {worker.active ? "Active" : "Inactive"}
+                </Status>
+              </div>
+              {statusPeriods.length ? (
+                <ol className={`${styles["status-period-list"]}`}>
+                  {statusPeriods.map((period, index) => (
+                    <li key={`${period.changedAt || "unknown"}-${index}`}>
+                      <Status tone={period.active ? "teal" : "neutral"}>
+                        {period.active ? "Active" : "Inactive"}
+                      </Status>
+                      <span>
+                        {period.changedAt ? date(period.changedAt) : "Start date not recorded"}
+                        {" — "}
+                        {period.endAt ? date(period.endAt) : "Present"}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className={`${styles["form-hint"]}`}>
+                  No status period dates are recorded yet. Status changes made
+                  from now on will appear here; earlier changes cannot be
+                  recovered.
+                </p>
+              )}
+              {statusPeriods.some((period) => !period.changedAt) && (
+                <p className={`${styles["form-hint"]}`}>
+                  This labour’s earlier status start date was not recorded.
+                  Dates are tracked from the first status change made here.
+                </p>
+              )}
             </div>
           </Panel>
           <div className={`${styles["history-grid"]}`}>
@@ -900,9 +986,8 @@ function WorkerHistory({ worker, onClose }) {
   );
 }
 
-export function WorkersPage({ businessType = "LABOUR" }) {
-  const navigate = useNavigate();
-  const type = businessType;
+export function WorkersPage() {
+  const type = "LABOUR";
   const [workers, setWorkers] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -940,6 +1025,9 @@ export function WorkersPage({ businessType = "LABOUR" }) {
   const save = (worker) => {
     setForm(false);
     setEditing(null);
+    setHistory((current) =>
+      current?._id === worker._id ? { ...current, ...worker } : current,
+    );
     setWorkers((current) =>
       current.some((item) => item._id === worker._id)
         ? current.map((item) =>
@@ -1007,17 +1095,9 @@ export function WorkersPage({ businessType = "LABOUR" }) {
   return (
     <>
       <PageHeader
-        eyebrow={type === "PAINTER" ? "PAINTER TEAM" : "LABOUR TEAM"}
-        title={
-          type === "PAINTER"
-            ? "Painter workforce management"
-            : "Labour workforce management"
-        }
-        detail={
-          type === "PAINTER"
-            ? "Maintain complete painter profiles, daily rates and work history separately from labour."
-            : "Maintain complete labour profiles, daily rates and work history separately from painters."
-        }
+        eyebrow="LABOUR TEAM"
+        title="Labour workforce management"
+        detail="Maintain complete labour profiles, daily rates and work history."
         action={
           <div className={`${styles["actions-inline"]}`}>
             <Button
@@ -1076,7 +1156,7 @@ export function WorkersPage({ businessType = "LABOUR" }) {
                       <td>
                         <strong>{worker.name}</strong>
                         <small>
-                          {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                          Labour
                         </small>
                       </td>
                       <td>{date(worker.deletedAt)}</td>
@@ -1124,11 +1204,7 @@ export function WorkersPage({ businessType = "LABOUR" }) {
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder={
-                type === "LABOUR"
-                  ? "Search labour by name, company, team or work zone…"
-                  : "Search painter by name or work zone…"
-              }
+              placeholder="Search labour by name, company, team or work zone…"
             />
             <select
               value={statusFilter}
@@ -1148,8 +1224,8 @@ export function WorkersPage({ businessType = "LABOUR" }) {
             <thead>
               <tr>
                 <th>{typeTitle(type)}</th>
-                {type === "LABOUR" && <th>Company</th>}
-                {type === "LABOUR" && <th>Team</th>}
+                <th>Company</th>
+                <th>Team</th>
                 <th>Photo</th>
                 <th>Contact</th>
                 <th>Skill</th>
@@ -1176,8 +1252,8 @@ export function WorkersPage({ businessType = "LABOUR" }) {
                     <strong>{worker.name}</strong>
                     <small>Joined {date(worker.joiningDate)}</small>
                   </td>
-                  {type === "LABOUR" && <td>{worker.companyName || "—"}</td>}
-                  {type === "LABOUR" && <td>{worker.teamName || "—"}</td>}
+                  <td>{worker.companyName || "—"}</td>
+                  <td>{worker.teamName || "—"}</td>
                   <td>
                     {worker.photoPath ? (
                       <img
@@ -1247,7 +1323,7 @@ export function WorkersPage({ businessType = "LABOUR" }) {
               ))}
               {!workers.length && (
                 <tr>
-                  <td colSpan={type === "LABOUR" ? 12 : 11}>
+                  <td colSpan="12">
                     <Empty
                       title={`No ${type.toLowerCase()} records`}
                       detail={`Add your first ${type.toLowerCase()} to get started.`}
@@ -1260,11 +1336,10 @@ export function WorkersPage({ businessType = "LABOUR" }) {
         </div>
       </Panel>
       {form && (
-        <WorkerForm type={type} onClose={() => setForm(false)} onSaved={save} />
+        <WorkerForm onClose={() => setForm(false)} onSaved={save} />
       )}{" "}
       {editing && (
         <WorkerForm
-          type={type}
           initial={editing}
           onClose={() => setEditing(null)}
           onSaved={save}

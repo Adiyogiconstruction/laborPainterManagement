@@ -3,7 +3,6 @@ import {
   Navigate,
   Route,
   Routes,
-  useLocation,
 } from "react-router-dom";
 import {
   CalendarDays,
@@ -49,40 +48,21 @@ const labourNavGroups = [
 
 const labourRoutes = (
   <>
-    <Route path="/labour" element={<DashboardPage businessType="LABOUR" />} />
-    <Route
-      path="/labour/workers"
-      element={<WorkersPage businessType="LABOUR" />}
-    />
-    <Route
-      path="/labour/attendance"
-      element={<AttendancePage businessType="LABOUR" />}
-    />
-    <Route
-      path="/labour/payments"
-      element={<PaymentsPage businessType="LABOUR" />}
-    />
-    <Route
-      path="/labour/reports"
-      element={<ReportsPage businessType="LABOUR" />}
-    />
+    <Route path="/labour" element={<DashboardPage />} />
+    <Route path="/labour/workers" element={<WorkersPage />} />
+    <Route path="/labour/attendance" element={<AttendancePage />} />
+    <Route path="/labour/payments" element={<PaymentsPage />} />
+    <Route path="/labour/reports" element={<ReportsPage />} />
   </>
 );
 
-const navLinkClass = (to, label, isActive, location) => {
-  const active = to.startsWith("/workers?")
-    ? `${location.pathname}${location.search}` === to
-    : isActive;
-  return `${active ? styles.active : ""} ${label === "Dashboard" ? styles["nav-primary"] : ""}`;
-};
+const navLinkClass = (label, isActive) =>
+  `${isActive ? styles.active : ""} ${label === "Dashboard" ? styles["nav-primary"] : ""}`;
 
 export function AppShell({ session, onLogout }) {
   const user = session?.user;
   const [open, setOpen] = useState(false);
   if (!user?.name || !user?.role) return null;
-  const location = useLocation();
-  const businessType = "LABOUR";
-  const activeNavGroups = labourNavGroups;
   const workspaceTitle = "Labour Management";
   const close = () => setOpen(false);
   return (
@@ -108,7 +88,7 @@ export function AppShell({ session, onLogout }) {
           </button>
         </div>
         <nav>
-          {activeNavGroups.map((group) => (
+          {labourNavGroups.map((group) => (
             <div className={`${styles["nav-group"]}`} key={group.label}>
               <span className={`${styles["nav-group-label"]}`}>
                 {group.label}
@@ -124,7 +104,7 @@ export function AppShell({ session, onLogout }) {
                     end={label === "Dashboard"}
                     onClick={close}
                     className={({ isActive }) =>
-                      navLinkClass(to, label, isActive, location)
+                      navLinkClass(label, isActive)
                     }
                   >
                     <Icon size={label === "Dashboard" ? 21 : 19} />
@@ -189,7 +169,7 @@ export function AppShell({ session, onLogout }) {
             </strong>
           </div>
           <div className={`${styles["secure-note"]}`}>
-            <ShieldCheck size={17} /> {businessType} workspace
+            <ShieldCheck size={17} /> LABOUR workspace
           </div>
         </header>
         <div className={`${styles["page-wrap"]}`}>

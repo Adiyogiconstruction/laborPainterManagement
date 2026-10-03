@@ -63,11 +63,11 @@
   .mobile-close {
     display: block;
     margin-left: auto;
-    color: #b8d2ce;
+    color: #f1d7bd;
   }
   .mobile-menu {
     display: block;
-    color: #175f58;
+    color: var(--brand-strong);
     margin-right: 12px;
   }
   .app-main {

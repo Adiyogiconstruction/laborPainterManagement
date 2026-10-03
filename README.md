@@ -18,7 +18,7 @@ It also includes clients/sites, work-supply records, worker advances, wages, cli
 
 Each work-supply record holds both sides of the transaction:
 
-- **Client billing**: what the client owes for the supplied labour/painter workforce.
+- **Client billing**: what the client owes for the supplied labour workforce.
 - **Worker payout**: what is payable to the labour worker/lead for that work.
 
 Billing can start from a blank bill or from an existing work-supply record; the latter pre-fills its client, site, work description and client billing amount. An incoming payment can likewise be linked to a bill, which automatically updates its status to Part paid or Paid.
@@ -84,8 +84,6 @@ The client is organized by responsibility so feature work stays local:
 ## Next production decisions
 
 Before go-live, confirm the actual bill template, GST/HSN requirements, payment approval rules, and whether individual labour attendance must be recorded separately from a lead-worker supply entry. The current model is intentionally ready for those additions without changing the main financial flow.
-
-Painter requirements belong to the separate project and are documented in [PAINTER_PROJECT_HANDOFF_PROMPT.md](PAINTER_PROJECT_HANDOFF_PROMPT.md).
 
 ## Hostinger production layout
 

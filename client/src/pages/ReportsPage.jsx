@@ -38,14 +38,12 @@ import {
 import {
   ErrorNote,
   Metric,
-  SectionTabs,
   errorMessage,
-  typeClass,
   typeTitle,
 } from "./shared.jsx";
 
-export function ReportsPage({ businessType = "LABOUR" }) {
-  const type = businessType;
+export function ReportsPage() {
+  const type = "LABOUR";
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [data, setData] = useState();
@@ -148,16 +146,8 @@ export function ReportsPage({ businessType = "LABOUR" }) {
     <div className={attendancePrintMode ? "attendance-print-root" : undefined}>
       <PageHeader
         eyebrow="ANALYTICS & RECORDS"
-        title={
-          type === "PAINTER"
-            ? "Painter operations report"
-            : "Labour operations report"
-        }
-        detail={
-          type === "PAINTER"
-            ? "Filter painter work, cash and paint movement by period."
-            : "Filter labour work and payment movement by period."
-        }
+        title="Labour operations report"
+        detail="Filter labour work and payment movement by period."
         action={
           <Button
             icon={Printer}
@@ -331,7 +321,7 @@ export function ReportsPage({ businessType = "LABOUR" }) {
                         <td>
                           <strong>{worker.workerName}</strong>
                           <small>
-                            {worker.type === "PAINTER" ? "Painter" : "Labour"}
+                            Labour
                           </small>
                         </td>
                         <td>{worker.PRESENT}</td>

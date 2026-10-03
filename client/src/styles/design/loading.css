@@ -3,7 +3,7 @@
   display: grid;
   place-content: center;
   gap: 12px;
-  color: var(--teal);
+  color: var(--brand-strong);
   text-align: center;
   font-size: 12px;
 }

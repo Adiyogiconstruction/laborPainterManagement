@@ -16,7 +16,8 @@ import {
 } from "../components/ui/index.jsx";
 import { ErrorNote, Metric, errorMessage, typeTitle } from "./shared.jsx";
 
-function PaymentForm({ businessType, onClose, onSaved }) {
+function PaymentForm({ onClose, onSaved }) {
+  const businessType = "LABOUR";
   const [workers, setWorkers] = useState([]);
   const [workerSearch, setWorkerSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -99,7 +100,7 @@ function PaymentForm({ businessType, onClose, onSaved }) {
         className={`${styles["form-grid"]} ${styles["three-col"]}`}
         onSubmit={save}
       >
-        <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
+        <Field label="Worker">
           <div className={`${styles["worker-picker"]}`}>
             <input
               required
@@ -232,7 +233,8 @@ function PaymentForm({ businessType, onClose, onSaved }) {
   );
 }
 
-export function PaymentsPage({ businessType = "LABOUR" }) {
+export function PaymentsPage() {
+  const businessType = "LABOUR";
   const [payments, setPayments] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [selectedWorker, setSelectedWorker] = useState("");
@@ -296,23 +298,13 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
   );
   const selectedWorkerName =
     workers.find((worker) => worker._id === selectedWorker)?.name ||
-    (businessType === "PAINTER" ? "All painters" : "All workers");
+    "All workers";
   return (
     <>
       <PageHeader
-        eyebrow={
-          businessType === "PAINTER" ? "PAINTER PAYMENTS" : "LABOUR PAYMENTS"
-        }
-        title={
-          businessType === "PAINTER"
-            ? "Painter payment ledger"
-            : "Labour payment ledger"
-        }
-        detail={
-          businessType === "PAINTER"
-            ? "Track painter cash advances, expenses and payout records separately from labour."
-            : "Track labour wages, advances and payout records separately from painter work."
-        }
+        eyebrow="LABOUR PAYMENTS"
+        title="Labour payment ledger"
+        detail="Track labour wages, advances and payout records."
         action={
           <div className={`${styles["actions-inline"]}`}>
             <Button
@@ -339,7 +331,7 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
         detail="Filter the ledger and inspect the selected worker's balance."
       >
         <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
-          <Field label={businessType === "PAINTER" ? "Painter" : "Worker"}>
+          <Field label="Worker">
             <select
               value={selectedWorker}
               onChange={(event) => setSelectedWorker(event.target.value)}
@@ -547,16 +539,8 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
                 <tr>
                   <td colSpan="6">
                     <Empty
-                      title={
-                        businessType === "PAINTER"
-                          ? "No painter payments"
-                          : "No labour payments"
-                      }
-                      detail={
-                        businessType === "PAINTER"
-                          ? "Record painter advances, wages or expense payouts."
-                          : "Record labour wages, advances or payout adjustments."
-                      }
+                      title="No labour payments"
+                      detail="Record labour wages, advances or payout adjustments."
                     />
                   </td>
                 </tr>
@@ -567,7 +551,6 @@ export function PaymentsPage({ businessType = "LABOUR" }) {
       </Panel>
       {adding && (
         <PaymentForm
-          businessType={businessType}
           onClose={() => setAdding(false)}
           onSaved={async () => {
             setAdding(false);

@@ -10,6 +10,10 @@ import {
   summarizeAdminActivity,
   recordAdminActivity,
 } from "../utils/adminActivity.js";
+import {
+  createCaptchaChallenge,
+  verifyCaptchaChallenge,
+} from "../utils/captcha.js";
 
 const router = Router();
 const authRateLimit = rateLimit({
@@ -22,6 +26,17 @@ const authRateLimit = rateLimit({
 });
 
 router.get(
+  "/captcha",
+  asyncHandler(async (_req, res) => {
+    const challenge = createCaptchaChallenge(process.env.JWT_SECRET);
+    res.json({
+      token: challenge.token,
+      image: `data:image/svg+xml,${encodeURIComponent(challenge.image)}`,
+    });
+  }),
+);
+
+router.get(
   "/setup-status",
   asyncHandler(async (_req, res) => {
     res.json({ needsSetup: (await User.countDocuments()) === 0 });
@@ -32,6 +47,15 @@ router.post(
   "/setup",
   authRateLimit,
   asyncHandler(async (req, res) => {
+    if (
+      !verifyCaptchaChallenge(
+        req.body.captchaToken,
+        req.body.captchaCode,
+        process.env.JWT_SECRET,
+      )
+    ) {
+      throw new ApiError(400, "CAPTCHA is incorrect or expired. Try again.");
+    }
     if (await User.countDocuments())
       throw new ApiError(409, "The workspace has already been set up.");
     const { name, email, password } = req.body;
@@ -54,6 +78,15 @@ router.post(
   "/login",
   authRateLimit,
   asyncHandler(async (req, res) => {
+    if (
+      !verifyCaptchaChallenge(
+        req.body.captchaToken,
+        req.body.captchaCode,
+        process.env.JWT_SECRET,
+      )
+    ) {
+      throw new ApiError(400, "CAPTCHA is incorrect or expired. Try again.");
+    }
     const { email, password } = req.body;
     if (!email || !password)
       throw new ApiError(400, "Email and password are required.");

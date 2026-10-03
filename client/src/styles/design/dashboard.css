@@ -21,22 +21,22 @@
   box-shadow: var(--shadow);
 }
 .quick-actions button.quick-primary {
-  background: #123d39;
-  border-color: #123d39;
-  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #2b1600;
 }
 .quick-actions button.quick-primary svg {
-  color: #f4c66b;
+  color: #713900;
 }
 .quick-actions button.quick-primary small {
-  color: #b8d2ce;
+  color: #713900;
 }
 .quick-actions button:hover {
   border-color: #9bc5be;
   transform: translateY(-1px);
 }
 .quick-actions svg {
-  color: var(--teal);
+  color: var(--brand-strong);
   margin-top: 2px;
 }
 .quick-actions strong,
@@ -262,7 +262,7 @@
 }
 .chart-present,
 .chart-paid {
-  background: linear-gradient(180deg, #56c8b5 0%, var(--teal) 100%);
+  background: linear-gradient(180deg, #ffad5c 0%, var(--brand) 100%);
 }
 .chart-double {
   background: linear-gradient(180deg, #d7b7ff 0%, var(--purple) 100%);

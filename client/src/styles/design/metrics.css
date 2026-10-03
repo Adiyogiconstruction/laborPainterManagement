@@ -22,7 +22,7 @@
   font-weight: 700;
 }
 .metric-top svg {
-  color: var(--teal);
+  color: var(--brand-strong);
 }
 .metric strong {
   display: block;
@@ -39,7 +39,7 @@
   line-height: 1.35;
 }
 .metric-teal {
-  border-top: 3px solid var(--teal);
+  border-top: 3px solid var(--brand);
 }
 .metric-purple {
   border-top: 3px solid var(--purple);

@@ -35,6 +35,15 @@ const workerSchema = new mongoose.Schema(
     overtimeHourlyRate: { type: Number, min: 0, default: 0 },
     joiningDate: { type: Date, required: true },
     active: { type: Boolean, default: true },
+    statusHistory: {
+      type: [
+        {
+          active: { type: Boolean, required: true },
+          changedAt: { type: Date, default: null },
+        },
+      ],
+      default: [],
+    },
     notes: { type: String, trim: true, maxlength: 1000 },
     deletedAt: { type: Date, default: null, index: true },
     deletedBy: {

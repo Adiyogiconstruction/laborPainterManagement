@@ -2,7 +2,7 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;
-  background: #143d39;
+  background: #2f1b0b;
 }
 .login-copy {
   display: flex;
@@ -19,7 +19,7 @@
   margin-bottom: 34px;
 }
 .login-copy .eyebrow {
-  color: #f6c86d;
+  color: #ff9b32;
 }
 .login-copy h1 {
   font-family: "Playfair Display", serif;
@@ -29,20 +29,20 @@
   margin: 0;
 }
 .login-copy h1 em {
-  color: #e9bd63;
+  color: #ff8f1a;
 }
 .login-copy > p:not(.eyebrow) {
   font-size: 15px;
   line-height: 1.7;
   max-width: 480px;
-  color: #b8d6d2;
+  color: #f0d4bb;
   margin-top: 25px;
 }
 .login-points {
   display: grid;
   gap: 9px;
   font-size: 12px;
-  color: #d1e7e4;
+  color: #f5e3d2;
   margin-top: 21px;
 }
 .login-card {
@@ -66,6 +66,27 @@
 .form-stack {
   display: grid;
   gap: 14px;
+}
+.captcha-challenge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.captcha-image {
+  width: 220px;
+  max-width: calc(100% - 48px);
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffc27f;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.field input[autocomplete="off"] {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 .brand-mobile {
   display: none;

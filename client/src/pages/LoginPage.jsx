@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
 import { Button, LoadingPage } from "../components/ui/index.jsx";
 import styles from "../styles/design.module.css";
@@ -7,8 +8,18 @@ import companyLogo from "../assets/image.png";
 export function LoginPage({ onAuthenticated }) {
   const [needsSetup, setNeedsSetup] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [captcha, setCaptcha] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const refreshCaptcha = async () => {
+    setCaptcha(null);
+    setForm((current) => ({ ...current, captchaCode: "" }));
+    try {
+      setCaptcha(await request(api.get("/auth/captcha")));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   useEffect(() => {
     request(api.get("/auth/setup-status"))
       .then(({ needsSetup: value }) => setNeedsSetup(value))
@@ -17,13 +28,19 @@ export function LoginPage({ onAuthenticated }) {
         setError(err.message);
       });
   }, []);
+  useEffect(() => {
+    refreshCaptcha();
+  }, []);
   const submit = async (event) => {
     event.preventDefault();
     setError("");
     setLoading(true);
     try {
       const data = await request(
-        api.post(needsSetup ? "/auth/setup" : "/auth/login", form),
+        api.post(needsSetup ? "/auth/setup" : "/auth/login", {
+          ...form,
+          captchaToken: captcha.token,
+        }),
       );
       onAuthenticated(data);
     } catch (err) {
@@ -110,11 +127,49 @@ export function LoginPage({ onAuthenticated }) {
               placeholder="Minimum 8 characters"
             />
           </label>
+          <label className={`${styles["field"]}`}>
+            <span>Verification code</span>
+            <div className={`${styles["captcha-challenge"]}`}>
+              {captcha ? (
+                <img
+                  className={`${styles["captcha-image"]}`}
+                  src={captcha.image}
+                  alt="CAPTCHA verification code"
+                />
+              ) : (
+                <span className={`${styles["captcha-image"]}`}>
+                  Loading code…
+                </span>
+              )}
+              <button
+                className={`${styles["icon-button"]}`}
+                type="button"
+                onClick={refreshCaptcha}
+                disabled={loading}
+                aria-label="Get a new verification code"
+                title="Get a new verification code"
+              >
+                <RefreshCw size={18} />
+              </button>
+            </div>
+            <input
+              required
+              autoComplete="off"
+              maxLength="6"
+              pattern="[A-HJ-NP-Z2-9]{6}"
+              value={form.captchaCode || ""}
+              onChange={(e) =>
+                setForm({ ...form, captchaCode: e.target.value.toUpperCase() })
+              }
+              placeholder="Enter the 6-character code"
+            />
+          </label>
           {error && <p className={`${styles["form-error"]}`}>{error}</p>}
           <Button
             type="submit"
             className={`${styles["button-primary"]} ${styles["button-block"]}`}
             loading={loading}
+            disabled={loading || !captcha}
           >
             {needsSetup ? "Create secure workspace" : "Sign in"}
           </Button>

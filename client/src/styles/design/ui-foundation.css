@@ -10,7 +10,7 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-family: "DM Mono", monospace;
-  color: var(--teal);
+  color: var(--brand-strong);
   font-size: 10px;
   font-weight: 500;
 }
@@ -40,16 +40,16 @@
   white-space: nowrap;
 }
 .button-primary {
-  color: #fff;
-  background: var(--teal);
-  box-shadow: 0 5px 13px rgba(15, 118, 110, 0.18);
+  color: #2b1600;
+  background: var(--brand);
+  box-shadow: 0 5px 13px rgba(255, 127, 0, 0.24);
 }
 .button-primary:hover {
-  background: #0a625b;
+  background: #e66f00;
 }
 .button-secondary {
-  color: #285854;
-  background: #e2f0ee;
+  color: var(--brand-strong);
+  background: var(--brand-soft);
 }
 .button-ghost {
   color: #526562;

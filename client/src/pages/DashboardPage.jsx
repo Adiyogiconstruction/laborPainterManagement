@@ -49,16 +49,11 @@ const objectEntries = (value = {}) =>
     .sort((left, right) => right.amount - left.amount)
     .slice(0, 6);
 
-export function DashboardPage({ businessType = "LABOUR" }) {
+export function DashboardPage() {
+  const businessType = "LABOUR";
   const navigate = useNavigate();
-  const workspace = businessType.toLowerCase();
+  const workspace = "labour";
   const [data, setData] = useState();
-  const [painterData, setPainterData] = useState({
-    workers: [],
-    paintTransactions: [],
-    paintBalances: [],
-    payments: [],
-  });
   const [error, setError] = useState("");
   const [analytics, setAnalytics] = useState();
   const [from, setFrom] = useState(monthStart);
@@ -94,29 +89,8 @@ export function DashboardPage({ businessType = "LABOUR" }) {
       .then(setAnalytics)
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
-    if (businessType !== "LABOUR") {
-      setAnalytics(undefined);
-      return;
-    }
     loadAnalytics();
-  }, [businessType, from, to, ...Object.values(analyticsFilters)]);
-  useEffect(() => {
-    if (businessType !== "PAINTER") return;
-    Promise.all([
-      request(api.get("/workers", { params: { type: businessType } })),
-      request(api.get("/paint")),
-      request(api.get("/payments", { params: { type: businessType } })),
-    ])
-      .then(([workersResult, paintResult, paymentsResult]) => {
-        setPainterData({
-          workers: workersResult.workers || [],
-          paintTransactions: paintResult.transactions || [],
-          paintBalances: paintResult.balances || [],
-          payments: paymentsResult.payments || [],
-        });
-      })
-      .catch((err) => setError(errorMessage(err)));
-  }, [businessType]);
+  }, [from, to, ...Object.values(analyticsFilters)]);
   useEffect(() => {
     if (!analytics?.attendanceByDate?.length) {
       setSelectedAttendancePoint(null);
@@ -150,50 +124,9 @@ export function DashboardPage({ businessType = "LABOUR" }) {
       </>
     );
   const { summary, latestPayments, outstanding } = data;
-  const workspaceLabel = businessType === "PAINTER" ? "Painter" : "Labour";
-  const activePeople =
-    businessType === "PAINTER" ? summary.activePainters : summary.activeLabour;
-  const payable =
-    businessType === "PAINTER" ? summary.painterPayable : summary.labourPayable;
-  const painterSummary =
-    businessType === "PAINTER"
-      ? painterData.workers.reduce(
-          (accumulator, worker) => {
-            accumulator.active += worker.active ? 1 : 0;
-            accumulator.totalDue += Number(worker.totalDue || 0);
-            return accumulator;
-          },
-          { active: 0, totalDue: 0 },
-        )
-      : null;
-  const paintSummary =
-    businessType === "PAINTER"
-      ? painterData.paintTransactions.reduce(
-          (accumulator, item) => {
-            const quantity = Number(item.quantity || 0);
-            if (item.kind === "ISSUED") accumulator.issued += quantity;
-            if (item.kind === "PURCHASED") accumulator.purchased += quantity;
-            if (item.kind === "USED") accumulator.used += quantity;
-            if (item.kind === "RETURNED") accumulator.returned += quantity;
-            return accumulator;
-          },
-          { issued: 0, purchased: 0, used: 0, returned: 0 },
-        )
-      : null;
-  const painterPaymentTotal =
-    businessType === "PAINTER"
-      ? painterData.payments.reduce(
-          (total, payment) => total + Number(payment.amount || 0),
-          0,
-        )
-      : 0;
-  const painterBalance =
-    businessType === "PAINTER"
-      ? painterData.paintBalances.reduce(
-          (total, item) => total + Number(item.balance || 0),
-          0,
-        )
-      : 0;
+  const workspaceLabel = "Labour";
+  const activePeople = summary.activeLabour;
+  const payable = summary.labourPayable;
   const attendanceRows = analytics?.attendanceByDate || [];
   const paymentRows = analytics?.paymentsByDate || [];
   const dueRows = analytics?.dueByWorker || [];
@@ -316,7 +249,7 @@ export function DashboardPage({ businessType = "LABOUR" }) {
             className={`${styles["button-secondary"]}`}
             onClick={() => {
               load();
-              if (businessType === "LABOUR") loadAnalytics();
+              loadAnalytics();
             }}
           >
             Refresh
@@ -506,7 +439,7 @@ export function DashboardPage({ businessType = "LABOUR" }) {
                       />
                       <polyline
                         fill="none"
-                        stroke="#56c8b5"
+                        stroke="#ff7f00"
                         strokeWidth="3"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -543,8 +476,8 @@ export function DashboardPage({ businessType = "LABOUR" }) {
                               cx={x}
                               cy={y}
                               r={isActive ? 5.5 : 3.5}
-                              fill={isActive ? "#123d39" : "#ffffff"}
-                              stroke="#56c8b5"
+                              fill={isActive ? "#934700" : "#ffffff"}
+                              stroke="#ff7f00"
                               strokeWidth={isActive ? 3 : 2}
                               style={{
                                 cursor: "pointer",
@@ -680,126 +613,19 @@ export function DashboardPage({ businessType = "LABOUR" }) {
           {" "}
           <Banknote size={18} />
           <span>
-            <strong>
-              {businessType === "PAINTER"
-                ? "Record painter payment"
-                : "Record labour payment"}
-            </strong>
+            <strong>Record labour payment</strong>
             <small>Add advance, wage or expense payment</small>
           </span>
         </button>
       </div>
-      {businessType === "PAINTER" && (
-        <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
-          <Panel
-            title="Painter-wise summary"
-            detail="Live painter count, cash issued, and remaining paint in circulation."
-          >
-            <div className={`${styles["money-list"]}`}>
-              <div>
-                <span>Active painters</span>
-                <strong>{number(painterSummary?.active || 0)}</strong>
-              </div>
-              <div>
-                <span>Cash issued</span>
-                <strong>{money(painterPaymentTotal)}</strong>
-              </div>
-              <div>
-                <span>Paint issued</span>
-                <strong>{number(paintSummary?.issued || 0)} L</strong>
-              </div>
-              <div>
-                <span>Paint used</span>
-                <strong>{number(paintSummary?.used || 0)} L</strong>
-              </div>
-              <div>
-                <span>Current paint balance</span>
-                <strong>{number(painterBalance)} L</strong>
-              </div>
-              <div>
-                <span>Outstanding due</span>
-                <strong>{money(painterSummary?.totalDue || 0)}</strong>
-              </div>
-            </div>
-          </Panel>
-          <Panel
-            title="Painter ledger"
-            detail="Quick view of each painter’s outstanding amount and paint availability."
-          >
-            <div className={`${styles["table-wrap"]}`}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Painter</th>
-                    <th>Skill</th>
-                    <th>Due</th>
-                    <th>Paint balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {painterData.workers.length ? (
-                    painterData.workers.map((worker) => {
-                      const workerPaintBalance = painterData.paintTransactions
-                        .filter((item) => item.worker?._id === worker._id)
-                        .reduce((total, item) => {
-                          const quantity = Number(item.quantity || 0);
-                          if (item.kind === "ISSUED") total += quantity;
-                          if (item.kind === "USED") total -= quantity;
-                          if (item.kind === "RETURNED") total += quantity;
-                          return total;
-                        }, 0);
-                      return (
-                        <tr key={worker._id}>
-                          <td>
-                            <strong>{worker.name}</strong>
-                            <small>
-                              {worker.active ? "Active" : "Inactive"}
-                            </small>
-                          </td>
-                          <td>{worker.skill || "Painter"}</td>
-                          <td className={`${styles["amount"]}`}>
-                            {money(worker.totalDue || 0)}
-                          </td>
-                          <td>{number(Math.max(workerPaintBalance, 0))} L</td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan="4">
-                        <Empty
-                          title="No painter ledger yet"
-                          detail="Add workers to start painter tracking."
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-        </div>
-      )}
       <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
         <Panel
-          title={
-            businessType === "PAINTER"
-              ? "Painter money snapshot"
-              : "Labour money snapshot"
-          }
-          detail={
-            businessType === "PAINTER"
-              ? "All painter amounts are calculated from saved painting work, paint movement and payment records."
-              : "All labour amounts are calculated from saved worker work, advance and payment records."
-          }
+          title="Labour money snapshot"
+          detail="All labour amounts are calculated from saved worker work, advances and payment records."
         >
           <div className={`${styles["money-list"]}`}>
             <div>
-              <span>
-                {businessType === "PAINTER"
-                  ? "Total painter cost"
-                  : "Total labour cost"}
-              </span>
+              <span>Total labour cost</span>
               <strong>{money(summary.totalWorkerCost)}</strong>
             </div>
             <div>
@@ -807,42 +633,22 @@ export function DashboardPage({ businessType = "LABOUR" }) {
               <strong>{money(summary.totalExpense)}</strong>
             </div>
             <div>
-              <span>
-                {businessType === "PAINTER"
-                  ? "Advance with painters"
-                  : "Advance with workers"}
-              </span>
+              <span>Advance with workers</span>
               <strong>{money(summary.advances)}</strong>
             </div>
           </div>
         </Panel>
         <Panel
-          title={
-            businessType === "PAINTER"
-              ? "Painter payout summary"
-              : "Labour payout summary"
-          }
-          detail={
-            businessType === "PAINTER"
-              ? "Track what has been paid to painters and their outstanding dues."
-              : "Track what has been paid to labour workers and their outstanding dues."
-          }
+          title="Labour payout summary"
+          detail="Track what has been paid to labour workers and their outstanding dues."
         >
           <div className={`${styles["money-list"]}`}>
             <div>
-              <span>
-                {businessType === "PAINTER"
-                  ? "Paid to painters"
-                  : "Paid to workers"}
-              </span>
+              <span>Paid to workers</span>
               <strong>{money(summary.workerPaid)}</strong>
             </div>
             <div>
-              <span>
-                {businessType === "PAINTER"
-                  ? "Due to painters"
-                  : "Due to workers"}
-              </span>
+              <span>Due to workers</span>
               <strong>{money(summary.dueToWorkers)}</strong>
             </div>
             <div>
