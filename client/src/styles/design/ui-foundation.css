@@ -51,6 +51,16 @@
   color: var(--brand-strong);
   background: var(--brand-soft);
 }
+.button-excel {
+  color: #087445;
+  background: #e7f7ed;
+  border: 1px solid #a9dfbf;
+}
+.button-pdf {
+  color: #b4343d;
+  background: #fff0f1;
+  border: 1px solid #f5c4c8;
+}
 .button-ghost {
   color: #526562;
   background: #f0f5f4;

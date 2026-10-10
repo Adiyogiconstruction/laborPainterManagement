@@ -5,27 +5,33 @@ const pageWidthMm = 297;
 const pageHeightMm = 210;
 const marginMm = 5;
 const dayColumnWidthMm = 4.54;
+const headerTopMm = 7;
+const headerHeightMm = 14;
 
 export const attendancePdfLayout = Object.freeze({
   pageWidthMm,
   pageHeightMm,
   marginMm,
-  columnWidthsMm: Object.freeze([
-    7,
-    38,
-    24,
-    23,
-    ...Array(31).fill(dayColumnWidthMm),
-    34,
-    20,
-  ]),
-  dayColumnCount: 31,
+  dayColumnWidthMm,
+  fixedColumnWidthsMm: Object.freeze([7, 38, 24, 23, 34, 20]),
 });
 
-export function validateAttendancePdfData({ month, workers }) {
+export const attendanceDaysInMonth = (month) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "")) {
     throw new Error("Select a valid attendance month before generating PDF.");
   }
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+};
+
+const columnWidthsForDays = (dayCount) => [
+  ...attendancePdfLayout.fixedColumnWidthsMm.slice(0, 4),
+  ...Array(dayCount).fill(dayColumnWidthMm),
+  ...attendancePdfLayout.fixedColumnWidthsMm.slice(4),
+];
+
+export function validateAttendancePdfData({ month, workers }) {
+  const dayCount = attendanceDaysInMonth(month);
   if (!Array.isArray(workers) || workers.length === 0) {
     throw new Error("No workers match the selected attendance filters.");
   }
@@ -36,7 +42,7 @@ export function validateAttendancePdfData({ month, workers }) {
       typeof worker.workerName !== "string" ||
       !worker.workerName.trim() ||
       !Array.isArray(worker.attendance) ||
-      worker.attendance.length !== attendancePdfLayout.dayColumnCount ||
+      worker.attendance.length !== dayCount ||
       !worker.attendance.every((code) => typeof code === "string") ||
       !["string", "number"].includes(typeof worker.totalDH) ||
       !["string", "number"].includes(typeof worker.totalDays)
@@ -45,7 +51,8 @@ export function validateAttendancePdfData({ month, workers }) {
     }
   });
 
-  const tableWidthMm = attendancePdfLayout.columnWidthsMm.reduce(
+  const columnWidthsMm = columnWidthsForDays(dayCount);
+  const tableWidthMm = columnWidthsMm.reduce(
     (total, width) => total + width,
     0,
   );
@@ -53,7 +60,7 @@ export function validateAttendancePdfData({ month, workers }) {
   if (tableWidthMm > printableWidthMm) {
     throw new Error("Attendance PDF columns exceed the printable page width.");
   }
-  return { tableWidthMm, printableWidthMm };
+  return { tableWidthMm, printableWidthMm, dayCount, columnWidthsMm };
 }
 
 const toImageData = (src) =>
@@ -103,10 +110,12 @@ export async function createAttendancePdf({
   profileLogoUrl,
   fallbackLogoUrl,
 }) {
-  const { tableWidthMm, printableWidthMm } = validateAttendancePdfData({
-    month,
-    workers,
-  });
+  const {
+    tableWidthMm,
+    printableWidthMm,
+    dayCount,
+    columnWidthsMm,
+  } = validateAttendancePdfData({ month, workers });
   const logoData = await resolveLogo(profileLogoUrl, fallbackLogoUrl);
   const doc = new jsPDF({
     orientation: "landscape",
@@ -127,14 +136,14 @@ export async function createAttendancePdf({
     "WORKERS NAME",
     "COMPANY",
     "LOCATION",
-    ...Array.from({ length: attendancePdfLayout.dayColumnCount }, (_, index) =>
+    ...Array.from({ length: dayCount }, (_, index) =>
       String(index + 1),
     ),
     "TOTAL (D + H)",
     "TOTAL DAYS",
   ];
-  if (headers.length !== attendancePdfLayout.columnWidthsMm.length) {
-    throw new Error("Attendance PDF must contain 31 day columns and both totals.");
+  if (headers.length !== columnWidthsMm.length) {
+    throw new Error(`Attendance PDF must contain ${dayCount} day columns and both totals.`);
   }
   const rows = workers.map((worker) => [
     String(worker.serialNumber),
@@ -168,13 +177,16 @@ export async function createAttendancePdf({
     },
   ]);
 
-  const widths = attendancePdfLayout.columnWidthsMm;
+  const widths = columnWidthsMm;
+  const firstDayColumn = 4;
+  const lastDayColumn = firstDayColumn + dayCount - 1;
+  const firstTotalColumn = lastDayColumn + 1;
   autoTable(doc, {
     head: [headers],
     body: rows,
-    startY: 36,
+    startY: headerTopMm + headerHeightMm + 1,
     margin: {
-      top: 36,
+      top: headerTopMm + headerHeightMm + 1,
       right: marginMm,
       bottom: 7,
       left: marginMm,
@@ -215,7 +227,7 @@ export async function createAttendancePdf({
       if (
         section === "body" &&
         column.index >= 1 &&
-        column.index <= 34 &&
+        column.index < headers.length - 1 &&
         typeof cell.raw === "string" &&
         cell.raw
       ) {
@@ -225,45 +237,71 @@ export async function createAttendancePdf({
         const textWidth = doc.getTextWidth(cell.raw);
         if (textWidth > availableWidth) {
           cell.styles.fontSize = Math.max(
-            column.index >= 4 ? 2.8 : 3.4,
+            column.index >= firstDayColumn && column.index <= lastDayColumn
+              ? 2.8
+              : 3.4,
             4.2 * (availableWidth / textWidth),
           );
         }
       }
-      if (section === "body" && column.index >= 4 && column.index <= 34) {
+      if (
+        section === "body" &&
+        column.index >= firstDayColumn &&
+        column.index <= lastDayColumn
+      ) {
         if (cell.raw === "A") {
           cell.styles.fillColor = [255, 194, 194];
         } else {
           cell.styles.fillColor = [255, 255, 255];
         }
       }
-      if (section === "body" && column.index >= 35) {
+      if (section === "body" && column.index >= firstTotalColumn) {
         cell.styles.fillColor = [222, 240, 222];
         cell.styles.fontStyle = "bold";
       }
     },
     willDrawPage() {
-      const page = doc.internal.pageSize;
-      doc.addImage(logoData, "PNG", marginMm, 7, 24, 21, undefined, "FAST");
+      const brandEndMm = 137;
+      const recipientEndMm = 203;
+      const monthEndMm = pageWidthMm - marginMm;
+      doc.setDrawColor(80, 80, 80);
+      doc.setLineWidth(0.2);
+      doc.rect(marginMm, headerTopMm, brandEndMm - marginMm, headerHeightMm);
+      doc.rect(brandEndMm, headerTopMm, recipientEndMm - brandEndMm, headerHeightMm);
+      doc.setFillColor(235, 242, 250);
+      doc.rect(
+        recipientEndMm,
+        headerTopMm,
+        monthEndMm - recipientEndMm,
+        headerHeightMm,
+        "F",
+      );
+      doc.rect(recipientEndMm, headerTopMm, monthEndMm - recipientEndMm, headerHeightMm);
+      doc.addImage(logoData, "PNG", 10, 8, 20, 12, undefined, "FAST");
       doc.setTextColor(35, 35, 35);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.text("TO:", 34, 11);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.text(doc.splitTextToSize(companyName || "Company", 108), 45, 11);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.text("ATTENDANCE MONTH:", 166, 11);
       doc.setFontSize(10);
+      doc.text("A D I Y O G I", 84, 12.5, { align: "center" });
+      doc.setFontSize(8);
+      doc.text("C O N S T R U C T I O N", 84, 17, { align: "center" });
+      doc.setFontSize(7);
+      doc.text("TO:", brandEndMm + 1.5, 10);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
       doc.text(
-        `${formatMonth(month).toUpperCase()} ${team || "ALL TEAMS"}`.trim(),
-        166,
+        doc.splitTextToSize(companyName || "NA", recipientEndMm - brandEndMm - 3),
+        brandEndMm + 1.5,
         17,
       );
-      doc.setDrawColor(115, 115, 115);
-      doc.setLineWidth(0.2);
-      doc.line(marginMm, 31, page.getWidth() - marginMm, 31);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text("ATTENDANCE MONTH:", recipientEndMm + 1.5, 10);
+      doc.setFontSize(8);
+      doc.text(
+        `${formatMonth(month).toUpperCase()}${team ? ` ${team}` : ""}`,
+        recipientEndMm + 1.5,
+        17,
+      );
     },
   });
 

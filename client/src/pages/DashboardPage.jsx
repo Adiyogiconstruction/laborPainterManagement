@@ -6,48 +6,56 @@ import {
   ArrowUpRight,
   Banknote,
   CalendarDays,
-  CircleDollarSign,
-  History,
+  Clock3,
   IndianRupee,
-  Landmark,
-  Pencil,
-  Plus,
-  Printer,
   RefreshCcw,
-  UserRoundPlus,
+  UserRoundCheck,
+  UserRoundX,
   UsersRound,
+  Wallet,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
-import { date, inputDate, money, number } from "../utils/formatters.js";
+import { date, money } from "../utils/formatters.js";
 import {
-  AddButton,
   Button,
   Empty,
   Field,
-  Modal,
   PageHeader,
   Panel,
-  SearchBox,
-  Status,
 } from "../components/ui/index.jsx";
 import { ErrorNote, Metric, errorMessage } from "./shared.jsx";
 
-const monthStart = () => {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+const localDateValue = (value) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const monthStart = () => {
+  const now = new Date();
+  return localDateValue(new Date(now.getFullYear(), now.getMonth(), 1));
+};
+
+const today = () => localDateValue(new Date());
+
+const dateRangeForPeriod = (period) => {
+  const end = new Date();
+  const start = new Date(end);
+  if (period === "DAY") return [localDateValue(end), localDateValue(end)];
+  if (period === "WEEK") start.setDate(end.getDate() - 6);
+  if (period === "MONTH") start.setDate(1);
+  if (period === "YEAR") start.setMonth(0, 1);
+  return [localDateValue(start), localDateValue(end)];
+};
 
 const chartValue = (value) => Number(value || 0).toLocaleString("en-IN");
 
-const objectEntries = (value = {}) =>
-  Object.entries(value)
-    .map(([label, amount]) => ({ label, amount: Number(amount || 0) }))
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, 6);
+const compactMoney = (value) =>
+  `₹${new Intl.NumberFormat("en-IN", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number(value || 0))}`;
 
 export function DashboardPage() {
   const businessType = "LABOUR";
@@ -58,14 +66,14 @@ export function DashboardPage() {
   const [analytics, setAnalytics] = useState();
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(today);
+  const [period, setPeriod] = useState("MONTH");
   const [analyticsFilters, setAnalyticsFilters] = useState({
     worker: "",
     companyName: "",
     teamName: "",
     workZone: "",
-    skill: "",
   });
-  const [selectedAttendancePoint, setSelectedAttendancePoint] = useState(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const load = () =>
     request(api.get("/dashboard/summary", { params: { type: businessType } }))
       .then(setData)
@@ -79,6 +87,7 @@ export function DashboardPage() {
         params: {
           from,
           to,
+          period,
           type: businessType,
           ...Object.fromEntries(
             Object.entries(analyticsFilters).filter(([, value]) => value),
@@ -90,29 +99,26 @@ export function DashboardPage() {
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
     loadAnalytics();
-  }, [from, to, ...Object.values(analyticsFilters)]);
-  useEffect(() => {
-    if (!analytics?.attendanceByDate?.length) {
-      setSelectedAttendancePoint(null);
+  }, [from, to, period, ...Object.values(analyticsFilters)]);
+  const updatePeriod = (event) => {
+    const nextPeriod = event.target.value;
+    setPeriod(nextPeriod);
+    if (nextPeriod === "ALL") {
+      setFrom("");
+      setTo("");
       return;
     }
-    setSelectedAttendancePoint((current) => {
-      if (
-        current &&
-        analytics.attendanceByDate.some((item) => item.date === current.date)
-      ) {
-        return current;
-      }
-      return analytics.attendanceByDate[analytics.attendanceByDate.length - 1];
-    });
-  }, [analytics?.attendanceByDate]);
+    if (nextPeriod === "CUSTOM") return;
+    const [start, end] = dateRangeForPeriod(nextPeriod);
+    setFrom(start);
+    setTo(end);
+  };
   if (!data)
     return (
       <>
         <PageHeader
-          eyebrow="OVERVIEW"
-          title="Good morning"
-          detail="A complete view of today’s workforce and money."
+          className={styles["dashboard-page-header"]}
+          title="Labour Operations Dashboard"
         />
         <ErrorNote error={error} />
         <Panel>
@@ -123,117 +129,30 @@ export function DashboardPage() {
         </Panel>
       </>
     );
-  const { summary, latestPayments, outstanding } = data;
-  const workspaceLabel = "Labour";
-  const activePeople = summary.activeLabour;
-  const payable = summary.labourPayable;
+  const { latestPayments } = data;
   const attendanceRows = analytics?.attendanceByDate || [];
-  const paymentRows = analytics?.paymentsByDate || [];
   const dueRows = analytics?.dueByWorker || [];
-  const exceptionRows = analytics?.exceptions || [];
+  const companyRows = analytics?.companySummary || [];
+  const companyMaxLabour = Math.max(
+    1,
+    ...companyRows.flatMap((item) => [
+      item.labour,
+      item.present,
+      item.absent,
+    ]),
+  );
+  const companyMaxAttendance = 100;
+  const companyMaxPayable = Math.max(
+    1,
+    ...companyRows.flatMap((item) => [item.payable, item.paid]),
+  );
   const attendanceSummary = attendanceRows.reduce(
     (accumulator, item) => {
-      accumulator.working += item.present + item.doublePresent + item.halfDay;
-      accumulator.present += item.present;
       accumulator.absent += item.absent;
-      accumulator.leave += item.leave;
       return accumulator;
     },
-    { working: 0, present: 0, absent: 0, leave: 0 },
+    { absent: 0 },
   );
-  const avgWorkingPerDay = attendanceRows.length
-    ? attendanceSummary.working / attendanceRows.length
-    : 0;
-  const attendanceTrendValues = attendanceRows.map((item) => ({
-    date: item.date,
-    total:
-      item.present +
-      item.doublePresent +
-      item.halfDay +
-      item.absent +
-      item.leave,
-    present: item.present + item.doublePresent + item.halfDay,
-  }));
-  const selectedTrendPoint =
-    selectedAttendancePoint && attendanceTrendValues.length
-      ? attendanceTrendValues.find(
-          (item) => item.date === selectedAttendancePoint.date,
-        ) || attendanceTrendValues.at(-1)
-      : attendanceTrendValues.at(-1) || null;
-  const maxAttendanceTrend = Math.max(
-    1,
-    ...attendanceTrendValues.map((item) => Math.max(item.total, item.present)),
-  );
-  const attendanceTrendWidth = 560;
-  const attendanceTrendHeight = 170;
-  const attendanceTrendPadding = 18;
-  const attendanceTrendAxisLeft = 34;
-  const attendanceTrendAxisBottom = 18;
-  const attendanceTrendChartHeight =
-    attendanceTrendHeight - attendanceTrendAxisBottom - attendanceTrendPadding;
-  const attendanceTrendTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-    const value = Math.round(maxAttendanceTrend * ratio);
-    const y =
-      attendanceTrendHeight -
-      attendanceTrendAxisBottom -
-      ratio * attendanceTrendChartHeight;
-    return { ratio, value, y };
-  });
-  const getAttendanceTrendPoint = (item, index, key) => {
-    const x =
-      attendanceTrendValues.length === 1
-        ? attendanceTrendWidth / 2
-        : attendanceTrendAxisLeft +
-          (index *
-            (attendanceTrendWidth -
-              attendanceTrendAxisLeft -
-              attendanceTrendPadding)) /
-            (attendanceTrendValues.length - 1);
-    const y =
-      attendanceTrendHeight -
-      attendanceTrendAxisBottom -
-      (item[key] / maxAttendanceTrend) * attendanceTrendChartHeight;
-    return { x, y };
-  };
-  const attendanceTrendPath = (key) => {
-    if (!attendanceTrendValues.length) return "";
-    const points = attendanceTrendValues.map((item, index) => {
-      const { x, y } = getAttendanceTrendPoint(item, index, key);
-      return `${x},${y}`;
-    });
-    return points.join(" ");
-  };
-  const attendanceAreaPath = () => {
-    if (!attendanceTrendValues.length) return "";
-    const path = attendanceTrendValues.map((item, index) => {
-      const { x, y } = getAttendanceTrendPoint(item, index, "present");
-      return { x, y };
-    });
-    if (path.length === 0) return "";
-    const first = path[0];
-    const last = path[path.length - 1];
-    const baselineY = attendanceTrendHeight - attendanceTrendAxisBottom;
-    return `M ${first.x} ${baselineY} L ${path
-      .map((point) => `${point.x} ${point.y}`)
-      .join(" L ")} L ${last.x} ${baselineY} Z`;
-  };
-  const maxAttendance = Math.max(
-    1,
-    ...attendanceRows.map(
-      (item) =>
-        item.present +
-        item.doublePresent +
-        item.halfDay +
-        item.absent +
-        item.leave,
-    ),
-  );
-  const maxMoney = Math.max(
-    1,
-    ...paymentRows.map((item) => item.paid),
-    ...attendanceRows.map((item) => item.payable),
-  );
-  const maxDue = Math.max(1, ...dueRows.map((item) => item.due));
   const updateAnalyticsFilter = (field) => (event) =>
     setAnalyticsFilters((current) => ({
       ...current,
@@ -242,7 +161,8 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader
-        title="Overview"
+        className={styles["dashboard-page-header"]}
+        title="Labour Operations Dashboard"
         action={
           <Button
             icon={RefreshCcw}
@@ -258,22 +178,53 @@ export function DashboardPage() {
       />
       <ErrorNote error={error} />
       <Panel
-        title="Operations dashboard"
-        detail="Filter a period and workforce slice to inspect attendance, money and exceptions."
+        className={`${styles["dashboard-filter-panel"]} ${mobileFiltersOpen ? styles["dashboard-filters-open"] : ""}`}
+        title="Dashboard filters"
+        detail="Choose a date range and narrow results by worker, company, team, or zone."
       >
-        <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
+        <button
+          type="button"
+          className={styles["dashboard-filter-toggle"]}
+          aria-expanded={mobileFiltersOpen}
+          aria-controls="dashboard-filter-controls"
+          onClick={() => setMobileFiltersOpen((open) => !open)}
+        >
+          {mobileFiltersOpen ? "Apply filters" : "Show dashboard filters"}
+        </button>
+        <div
+          className={`${styles["toolbar"]} ${styles["filter-bar"]}`}
+          id="dashboard-filter-controls"
+        >
+          <Field label="Period">
+            <select value={period} onChange={updatePeriod}>
+              <option value="ALL">All time</option>
+              <option value="DAY">Day</option>
+              <option value="WEEK">Week</option>
+              <option value="MONTH">Month</option>
+              <option value="YEAR">Year</option>
+              <option value="CUSTOM">Custom</option>
+            </select>
+          </Field>
           <Field label="From">
             <input
               type="date"
               value={from}
-              onChange={(event) => setFrom(event.target.value)}
+              disabled={period === "ALL"}
+              onChange={(event) => {
+                setPeriod("CUSTOM");
+                setFrom(event.target.value);
+              }}
             />
           </Field>
           <Field label="To">
             <input
               type="date"
               value={to}
-              onChange={(event) => setTo(event.target.value)}
+              disabled={period === "ALL"}
+              onChange={(event) => {
+                setPeriod("CUSTOM");
+                setTo(event.target.value);
+              }}
             />
           </Field>
           <Field label="Worker">
@@ -290,17 +241,16 @@ export function DashboardPage() {
             </select>
           </Field>
           {[
-            ["companyName", "Company", "company"],
-            ["teamName", "Team", "team"],
-            ["workZone", "Location", "workZone"],
-            ["skill", "Skill", "skill"],
-          ].map(([field, label, compositionKey]) => (
+            ["companyName", "Company", "companies", "company"],
+            ["teamName", "Team", "teams", "team"],
+            ["workZone", "Zone", "zones", "workZone"],
+          ].map(([field, label, pluralLabel, compositionKey]) => (
             <Field label={label} key={field}>
               <select
                 value={analyticsFilters[field]}
                 onChange={updateAnalyticsFilter(field)}
               >
-                <option value="">All {label.toLowerCase()}s</option>
+                <option value="">All {pluralLabel}</option>
                 {Object.keys(
                   analytics?.composition?.[compositionKey] || {},
                 ).map((value) => (
@@ -316,368 +266,387 @@ export function DashboardPage() {
       {analytics && (
         <>
           <div
-            className={`${styles["metric-grid"]} ${styles["dashboard-metrics"]}`}
+            className={`${styles["metric-grid"]} ${styles["dashboard-metrics"]} ${styles["dashboard-metrics-primary"]}`}
           >
             <Metric
-              label="Attendance rate"
-              value={`${analytics.kpis.attendanceRate}%`}
-              detail={`${chartValue(analytics.kpis.present)} present entries`}
+              label="Total labour"
+              value={chartValue(
+                analytics.kpis.activeWorkers + analytics.kpis.inactiveWorkers,
+              )}
+              detail="Profiles in current selection"
+              tone="blue"
+              className={styles["metric-dashboard-total"]}
+              icon={UsersRound}
+            />
+            <Metric
+              label="Active labour"
+              value={chartValue(analytics.kpis.activeWorkers)}
+              detail="In current selection"
               tone="teal"
+              className={styles["metric-dashboard-active"]}
+              icon={UserRoundCheck}
+            />
+            <Metric
+              label="Inactive labour"
+              value={chartValue(analytics.kpis.inactiveWorkers)}
+              detail="In current selection"
+              tone="coral"
+              className={styles["metric-dashboard-inactive"]}
+              icon={UserRoundX}
+            />
+            <Metric
+              label="Present"
+              value={chartValue(analytics.kpis.present)}
+              detail={`${analytics.kpis.attendanceRate}% attendance rate`}
+              tone="teal"
+              className={styles["metric-dashboard-present"]}
               icon={CalendarDays}
+            />
+            <Metric
+              label="Absent"
+              value={chartValue(attendanceSummary.absent)}
+              detail="Selected period"
+              tone="coral"
+              className={styles["metric-dashboard-absent"]}
+              icon={CalendarDays}
+            />
+            <Metric
+              label="Unmarked"
+              value={chartValue(analytics.kpis.unmarked)}
+              detail="Attendance entries"
+              tone="amber"
+              className={styles["metric-dashboard-unmarked"]}
+              icon={CalendarDays}
+            />
+            <Metric
+              label="OT hours"
+              value={chartValue(analytics.kpis.overtimeHours)}
+              detail="Selected period"
+              tone="purple"
+              className={styles["metric-dashboard-overtime"]}
+              icon={Clock3}
             />
             <Metric
               label="Period payable"
               value={money(analytics.kpis.payable)}
-              detail={`${chartValue(analytics.kpis.overtimeHours)} OT hours`}
+              detail="Attendance-based labour cost"
               tone="amber"
+              className={styles["metric-dashboard-payable"]}
               icon={IndianRupee}
             />
+          </div>
+          <div
+            className={`${styles["metric-grid"]} ${styles["dashboard-metrics"]} ${styles["dashboard-metrics-secondary"]}`}
+          >
             <Metric
-              label="Period paid"
+              label="Period paid out"
               value={money(analytics.kpis.paid)}
-              detail="Payments in selected range"
-              tone="blue"
+              detail="Net worker payments"
+              tone="teal"
+              className={styles["metric-dashboard-paid"]}
               icon={Banknote}
             />
             <Metric
-              label="Unmarked entries"
-              value={chartValue(analytics.kpis.unmarked)}
-              detail={`${chartValue(analytics.kpis.activeWorkers)} active workers`}
+              label="Labour due"
+              value={money(analytics.kpis.lifetimeDue)}
+              detail="Outstanding across selected workers"
               tone="coral"
-              icon={CalendarDays}
+              className={styles["metric-dashboard-due"]}
+              icon={Wallet}
             />
           </div>
-          <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
+          <div className={`${styles["content-grid"]} ${styles["dashboard-company-charts"]}`}>
             <Panel
-              title="Attendance trend"
-              detail="Workers tracked vs present across the selected period."
+              title="Company-wise labour strength"
+              detail="Based on the company name saved in each current labour profile."
             >
-              <div className={`${styles["attendance-trend-summary"]}`}>
-                <span>
-                  <strong>
-                    {attendanceRows.length
-                      ? avgWorkingPerDay.toFixed(1)
-                      : "0.0"}
-                  </strong>
-                  avg working / day
-                </span>
-                <span>
-                  <strong>{chartValue(attendanceSummary.present)}</strong>
-                  present
-                </span>
-                <span>
-                  <strong>{chartValue(attendanceSummary.working)}</strong>
-                  total tracked
-                </span>
-              </div>
-              <div className={`${styles["attendance-trend-insight"]}`}>
-                <span>Insight</span>
-                <strong>
-                  {selectedTrendPoint
-                    ? `${new Date(`${selectedTrendPoint.date}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} • ${selectedTrendPoint.present} present`
-                    : "No attendance data"}
-                </strong>
-              </div>
-              <div className={`${styles["chart-scroll"]}`}>
-                {attendanceRows.length ? (
-                  <div className={`${styles["attendance-trend-wrap"]}`}>
-                    <svg
-                      viewBox={`0 0 ${attendanceTrendWidth} ${attendanceTrendHeight}`}
-                      preserveAspectRatio="none"
-                      className={`${styles["attendance-trend-svg"]}`}
-                    >
-                      <defs>
-                        <linearGradient
-                          id="attendanceTrendFill"
-                          x1="0"
-                          x2="0"
-                          y1="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="rgba(86, 200, 181, 0.28)"
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="rgba(86, 200, 181, 0.03)"
-                          />
-                        </linearGradient>
-                      </defs>
-                      {attendanceTrendTicks.map((tick) => (
-                        <g key={tick.ratio}>
-                          <line
-                            x1={attendanceTrendAxisLeft}
-                            x2={attendanceTrendWidth - attendanceTrendPadding}
-                            y1={tick.y}
-                            y2={tick.y}
-                            stroke="rgba(18, 61, 57, 0.08)"
-                            strokeWidth="1"
-                            strokeDasharray="3 3"
-                          />
-                          <text
-                            x={8}
-                            y={tick.y + 3}
-                            fill="rgba(18, 61, 57, 0.7)"
-                            fontSize="9"
-                            fontFamily="DM Sans, sans-serif"
-                          >
-                            {tick.value}
-                          </text>
-                        </g>
+              <div className={styles["dashboard-vertical-chart"]}>
+                {companyRows.length ? (
+                  <>
+                    <div className={styles["dashboard-chart-legend"]}>
+                      <span><i className={styles["dashboard-bar-total"]} /> Total</span>
+                      <span><i className={styles["dashboard-bar-present"]} /> Present</span>
+                      <span><i className={styles["dashboard-bar-absent"]} /> Absent</span>
+                    </div>
+                    <div className={styles["dashboard-chart-columns"]}>
+                      {companyRows.slice(0, 6).map((company) => (
+                        <div className={styles["dashboard-chart-column"]} key={company.company}>
+                          <div className={styles["dashboard-chart-stage"]}>
+                            {[
+                              ["Total", company.labour, "dashboard-bar-total"],
+                              ["Present", company.present, "dashboard-bar-present"],
+                              ["Absent", company.absent, "dashboard-bar-absent"],
+                            ].map(([label, value, tone]) => {
+                              const height = Math.min(
+                                100,
+                                (Number(value || 0) / companyMaxLabour) * 100,
+                              );
+                              return (
+                                <div
+                                  className={styles["dashboard-chart-bar"]}
+                                  key={label}
+                                  title={`${company.company} · ${label}: ${chartValue(value)}`}
+                                  style={{ "--bar-height": `${height}%` }}
+                                >
+                                  <span>{chartValue(value)}</span>
+                                  <i className={styles[tone]} />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <strong className={styles["dashboard-chart-label"]} title={company.company}>
+                            {company.company}
+                          </strong>
+                          <small className={styles["dashboard-chart-detail"]}>
+                            {chartValue(company.unmarked)} unmarked
+                          </small>
+                        </div>
                       ))}
-                      <path
-                        d={attendanceAreaPath()}
-                        fill="url(#attendanceTrendFill)"
-                      />
-                      <polyline
-                        fill="none"
-                        stroke="rgba(18, 61, 57, 0.18)"
-                        strokeWidth="1.5"
-                        points={attendanceTrendPath("total")}
-                        strokeDasharray="4 6"
-                      />
-                      <polyline
-                        fill="none"
-                        stroke="#ff7f00"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        points={attendanceTrendPath("present")}
-                      />
-                      {attendanceTrendValues.map((item, index) => {
-                        const { x, y } = getAttendanceTrendPoint(
-                          item,
-                          index,
-                          "present",
+                    </div>
+                  </>
+                ) : (
+                  <Empty title="No company labour in this selection" />
+                )}
+              </div>
+            </Panel>
+            <Panel
+              title="Company attendance rate"
+              detail="Present attendance entries compared with expected labour days."
+            >
+              <div className={styles["dashboard-vertical-chart"]}>
+                {companyRows.length ? (
+                  <>
+                    <div className={styles["dashboard-chart-legend"]}>
+                      <span><i className={styles["dashboard-bar-rate"]} /> Attendance rate</span>
+                    </div>
+                    <div className={styles["dashboard-chart-columns"]}>
+                      {companyRows.slice(0, 6).map((company) => {
+                        const height = Math.min(
+                          100,
+                          (Number(company.attendanceRate || 0) / companyMaxAttendance) * 100,
                         );
-                        const isActive = selectedTrendPoint?.date === item.date;
                         return (
-                          <g
-                            key={item.date}
-                            onMouseEnter={() =>
-                              setSelectedAttendancePoint(item)
-                            }
-                            onMouseLeave={() =>
-                              setSelectedAttendancePoint(
-                                attendanceTrendValues.at(-1) || null,
-                              )
-                            }
-                            onFocus={() => setSelectedAttendancePoint(item)}
-                            onBlur={() =>
-                              setSelectedAttendancePoint(
-                                attendanceTrendValues.at(-1) || null,
-                              )
-                            }
-                            tabIndex={0}
-                          >
-                            <title>{`${new Date(`${item.date}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} • ${item.present} present`}</title>
-                            <circle
-                              cx={x}
-                              cy={y}
-                              r={isActive ? 5.5 : 3.5}
-                              fill={isActive ? "#934700" : "#ffffff"}
-                              stroke="#ff7f00"
-                              strokeWidth={isActive ? 3 : 2}
-                              style={{
-                                cursor: "pointer",
-                                transition: "all 0.2s ease",
-                              }}
-                            />
-                          </g>
+                          <div className={styles["dashboard-chart-column"]} key={company.company}>
+                            <div className={styles["dashboard-chart-stage"]}>
+                              <div
+                                className={styles["dashboard-chart-bar"]}
+                                title={`${company.company} · Attendance rate: ${company.attendanceRate}%`}
+                                style={{ "--bar-height": `${height}%` }}
+                              >
+                                <span>{company.attendanceRate}%</span>
+                                <i className={styles["dashboard-bar-rate"]} />
+                              </div>
+                            </div>
+                            <strong className={styles["dashboard-chart-label"]} title={company.company}>
+                              {company.company}
+                            </strong>
+                          </div>
                         );
                       })}
-                    </svg>
-                  </div>
+                    </div>
+                  </>
                 ) : (
-                  <Empty title="No attendance in this range" />
+                  <Empty title="No attendance in this selection" />
                 )}
               </div>
-              <div className={`${styles["chart-legend"]}`}>
-                <span>
-                  <i className={`${styles["chart-present"]}`} /> Present
-                </span>
-                <span>
-                  <i className={`${styles["chart-absent"]}`} /> Total tracked
-                </span>
-              </div>
             </Panel>
-            <Panel title="Payable vs paid" detail="Selected period totals.">
-              <div className={`${styles["money-donut-wrap"]}`}>
-                {(() => {
-                  const payableTotal = Number(analytics.kpis.payable || 0);
-                  const paidTotal = Number(analytics.kpis.paid || 0);
-                  const totalMoney = payableTotal + paidTotal;
-                  const payablePercent = totalMoney
-                    ? (payableTotal / totalMoney) * 100
-                    : 0;
-                  const donutBackground = totalMoney
-                    ? `conic-gradient(var(--amber) 0 ${payablePercent}%, var(--teal) ${payablePercent}% 100%)`
-                    : "conic-gradient(#dfe9e7 0 100%)";
-
-                  return (
-                    <>
-                      <div
-                        className={`${styles["money-donut"]}`}
-                        style={{ background: donutBackground }}
-                      >
-                        <div className={`${styles["money-donut-center"]}`}>
-                          <strong>{money(totalMoney)}</strong>
-                          <small>Total</small>
+            <Panel
+              title="Payable vs paid by company"
+              detail="Attendance-based labour cost compared with net payments in the selected period."
+            >
+              <div className={styles["dashboard-vertical-chart"]}>
+                {companyRows.length ? (
+                  <>
+                    <div className={styles["dashboard-chart-legend"]}>
+                      <span><i className={styles["dashboard-bar-payable"]} /> Payable</span>
+                      <span><i className={styles["dashboard-bar-paid"]} /> Paid</span>
+                    </div>
+                    <div className={styles["dashboard-chart-columns"]}>
+                      {companyRows.slice(0, 6).map((company) => (
+                        <div className={styles["dashboard-chart-column"]} key={company.company}>
+                          <div className={styles["dashboard-chart-stage"]}>
+                            {[
+                              ["Payable", company.payable, "dashboard-bar-payable"],
+                              ["Paid", company.paid, "dashboard-bar-paid"],
+                            ].map(([label, value, tone]) => {
+                              const height = Math.min(
+                                100,
+                                (Number(value || 0) / companyMaxPayable) * 100,
+                              );
+                              return (
+                                <div
+                                  className={styles["dashboard-chart-bar"]}
+                                  key={label}
+                                  title={`${company.company} · ${label}: ${money(value)}`}
+                                  style={{ "--bar-height": `${height}%` }}
+                                >
+                                  <span>{compactMoney(value)}</span>
+                                  <i className={styles[tone]} />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <strong className={styles["dashboard-chart-label"]} title={company.company}>
+                            {company.company}
+                          </strong>
                         </div>
-                      </div>
-                      <div className={`${styles["money-donut-legend"]}`}>
-                        <span>
-                          <i className={`${styles["chart-payable"]}`} /> Payable
-                          <strong>{money(payableTotal)}</strong>
-                        </span>
-                        <span>
-                          <i className={`${styles["chart-paid"]}`} /> Paid
-                          <strong>{money(paidTotal)}</strong>
-                        </span>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            </Panel>
-          </div>
-          <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
-            <Panel
-              title="Workers with highest due"
-              detail="Lifetime outstanding balances for the filtered workforce."
-            >
-              <div className={`${styles["rank-list"]}`}>
-                {dueRows.length ? (
-                  dueRows.map((item) => (
-                    <div
-                      className={`${styles["rank-row"]}`}
-                      key={item.workerId}
-                    >
-                      <div>
-                        <strong>{item.workerName}</strong>
-                        <small>{money(item.due)} due</small>
-                      </div>
-                      <div className={`${styles["rank-track"]}`}>
-                        <i style={{ width: `${(item.due / maxDue) * 100}%` }} />
-                      </div>
+                      ))}
                     </div>
-                  ))
+                  </>
                 ) : (
-                  <Empty title="No outstanding dues" />
-                )}
-              </div>
-            </Panel>
-            <Panel
-              title="Attendance exceptions"
-              detail="Workers needing attention in the selected period."
-            >
-              <div className={`${styles["exception-list"]}`}>
-                {exceptionRows.length ? (
-                  exceptionRows.map((item) => (
-                    <div key={item.workerId}>
-                      <strong>{item.workerName}</strong>
-                      <small>
-                        {item.notMarked} unmarked · {item.absent} absent ·{" "}
-                        {item.leave} leave
-                      </small>
-                    </div>
-                  ))
-                ) : (
-                  <Empty title="No exceptions" />
+                  <Empty title="No company payments in this selection" />
                 )}
               </div>
             </Panel>
           </div>
         </>
       )}
+      <div className={styles["dashboard-actions"]}>
+        <Button
+          icon={Banknote}
+          className={styles["button-primary"]}
+          onClick={() => navigate(`/${workspace}/payments`)}
+        >
+          Record labour payment
+        </Button>
+      </div>
       <div
-        className={`${styles["metric-grid"]} ${styles["dashboard-metrics"]}`}
+        className={`${styles["content-grid"]} ${styles["dashboard-summary-grid"]} ${styles["dashboard-reference-summary"]}`}
       >
-        <Metric
-          label={`${workspaceLabel} dues`}
-          value={money(summary.dueToWorkers)}
-          detail={`${money(summary.workerPaid)} paid out`}
-          tone="coral"
-          icon={ArrowUpRight}
-        />
-        <Metric
-          label={`${workspaceLabel} working`}
-          value={number(activePeople)}
-          detail={`${money(payable)} payable`}
-          icon={UsersRound}
-        />
-      </div>
-      <div className={`${styles["quick-actions"]}`}>
-        <button onClick={() => navigate(`/${workspace}/payments`)}>
-          {" "}
-          <Banknote size={18} />
-          <span>
-            <strong>Record labour payment</strong>
-            <small>Add advance, wage or expense payment</small>
-          </span>
-        </button>
-      </div>
-      <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
         <Panel
-          title="Labour money snapshot"
-          detail="All labour amounts are calculated from saved worker work, advances and payment records."
+          title={
+            <span className={styles["dashboard-panel-title"]}>
+              <i className={styles["dashboard-panel-icon-money"]}>
+                <IndianRupee size={14} />
+              </i>
+              Labour Money Summary
+            </span>
+          }
+          detail="Selected-period payments and expenses; outstanding due is lifetime-based."
+          className={styles["dashboard-money-panel"]}
         >
-          <div className={`${styles["money-list"]}`}>
-            <div>
-              <span>Total labour cost</span>
-              <strong>{money(summary.totalWorkerCost)}</strong>
-            </div>
-            <div>
-              <span>Total expense paid</span>
-              <strong>{money(summary.totalExpense)}</strong>
-            </div>
-            <div>
-              <span>Advance with workers</span>
-              <strong>{money(summary.advances)}</strong>
-            </div>
+          <div className={styles["dashboard-money-cards"]}>
+            {[
+              ["Period Payable", analytics?.kpis?.payable || 0, "payable", IndianRupee],
+              ["Paid to Workers", analytics?.kpis?.paid || 0, "paid", Banknote],
+              ["Advances Issued", analytics?.kpis?.advancePaid || 0, "advance", ArrowUpRight],
+              ["Lifetime Due", analytics?.kpis?.lifetimeDue || 0, "due", Wallet],
+            ].map(([label, amount, tone, Icon]) => (
+              <div className={styles[`dashboard-money-${tone}`]} key={label}>
+                <Icon size={16} />
+                <span>{label}</span>
+                <strong>{money(amount)}</strong>
+              </div>
+            ))}
           </div>
         </Panel>
         <Panel
-          title="Labour payout summary"
-          detail="Track what has been paid to labour workers and their outstanding dues."
+          title={
+            <span className={styles["dashboard-panel-title"]}>
+              <i className={styles["dashboard-panel-icon-due"]}>
+                <Wallet size={14} />
+              </i>
+              Highest Due Workers
+            </span>
+          }
+          detail="Lifetime outstanding balances for selected workers."
+          className={styles["dashboard-due-panel"]}
+          action={
+            <button
+              className={styles["text-button"]}
+              onClick={() => navigate(`/${workspace}/workers`)}
+            >
+              View all
+            </button>
+          }
         >
-          <div className={`${styles["money-list"]}`}>
-            <div>
-              <span>Paid to workers</span>
-              <strong>{money(summary.workerPaid)}</strong>
-            </div>
-            <div>
-              <span>Due to workers</span>
-              <strong>{money(summary.dueToWorkers)}</strong>
-            </div>
-            <div>
-              <span>Advances</span>
-              <strong>{money(summary.advances)}</strong>
-            </div>
-            <div>
-              <span>Other expenses</span>
-              <strong>{money(summary.totalExpense)}</strong>
-            </div>
+          <div className={styles["dashboard-ranked-dues"]}>
+            {dueRows.length ? (
+              dueRows.slice(0, 5).map((item, index) => (
+                <div key={item.workerId}>
+                  <span className={styles["dashboard-rank-number"]}>{index + 1}</span>
+                  <strong>{item.workerName}</strong>
+                  <small>{money(item.due)} due</small>
+                </div>
+              ))
+            ) : (
+              <Empty title="No outstanding dues" />
+            )}
           </div>
         </Panel>
-      </div>
-      <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
         <Panel
-          title="Recent transactions"
+          title={
+            <span className={styles["dashboard-panel-title"]}>
+              <i className={styles["dashboard-panel-icon-expense"]}>
+                <Banknote size={14} />
+              </i>
+              Expenses & Advances
+            </span>
+          }
+          detail="Top categories for selected-period Kharchi, advances and other worker outflows."
+          className={styles["dashboard-expense-panel"]}
+          action={
+            <button
+              className={styles["text-button"]}
+              onClick={() => navigate(`/${workspace}/payments`)}
+            >
+              View all
+            </button>
+          }
+        >
+          <div className={styles["dashboard-expense-list"]}>
+            {analytics?.expenseBreakdown?.length ? (
+              analytics.expenseBreakdown.map(({ label, amount }, index) => (
+                <div className={styles["dashboard-expense-row"]} key={label}>
+                  <span className={styles[`dashboard-expense-icon-${index % 4}`]}>
+                    {label.slice(0, 1).toUpperCase()}
+                  </span>
+                  <strong>{label}</strong>
+                  <b>{money(amount)}</b>
+                </div>
+              ))
+            ) : (
+              <Empty title="No expenses in this period" />
+            )}
+            <div className={styles["dashboard-expense-total"]}>
+              <strong>Total Kharchi</strong>
+              <b>{money(analytics?.kpis?.expenseTotal || 0)}</b>
+            </div>
+            <div className={styles["dashboard-expense-total"]}>
+              <strong>Total Advances</strong>
+              <b>{money(analytics?.kpis?.advancePaid || 0)}</b>
+            </div>
+            {!!analytics?.kpis?.otherOutflowTotal && (
+              <div className={styles["dashboard-expense-total"]}>
+                <strong>Other worker outflows</strong>
+                <b>{money(analytics.kpis.otherOutflowTotal)}</b>
+              </div>
+            )}
+          </div>
+        </Panel>
+        <Panel
+          title={
+            <span className={styles["dashboard-panel-title"]}>
+              <i className={styles["dashboard-panel-icon-transactions"]}>
+                <ArrowDownLeft size={14} />
+              </i>
+              Recent Transactions
+            </span>
+          }
           detail="Latest money received and paid."
+          className={styles["dashboard-transactions-panel"]}
           action={
             <button
               className={`${styles["text-button"]}`}
               onClick={() => navigate(`/${workspace}/payments`)}
             >
-              All payments
+              View all
             </button>
           }
         >
           <div className={`${styles["compact-list"]}`}>
             {latestPayments.length ? (
-              latestPayments.map((payment) => (
+              latestPayments.slice(0, 5).map((payment) => (
                 <div key={payment._id}>
                   <span
                     className={`${styles["round-icon"]} ${styles[payment.flow === "INFLOW" ? "inflow" : "outflow"]}`}
@@ -715,6 +684,68 @@ export function DashboardPage() {
           </div>
         </Panel>
       </div>
+      <Panel
+        title={
+          <span className={styles["dashboard-panel-title"]}>
+            <i className={styles["dashboard-panel-icon-zone"]}>
+              <UsersRound size={14} />
+            </i>
+            Zone Summary
+          </span>
+        }
+        detail="Key metrics by zone for the selected period."
+        className={styles["dashboard-zone-panel"]}
+      >
+        {analytics?.zoneSummary?.length ? (
+          <div className={styles["dashboard-zone-table-wrap"]}>
+            <table className={styles["dashboard-zone-table"]}>
+              <thead>
+                <tr>
+                  <th>Zone</th>
+                  <th>Total Labour</th>
+                  <th>Active</th>
+                  <th>Inactive</th>
+                  <th>Present</th>
+                  <th>Absent</th>
+                  <th>Unmarked</th>
+                  <th>Attendance Rate</th>
+                  <th>OT Hours</th>
+                  <th>Payable</th>
+                  <th>Paid</th>
+                  <th>Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.zoneSummary.map((zone) => (
+                  <tr key={zone.zone}>
+                    <th scope="row">{zone.zone}</th>
+                    <td>{chartValue(zone.labour)}</td>
+                    <td>{chartValue(zone.active)}</td>
+                    <td>{chartValue(zone.inactive)}</td>
+                    <td>{chartValue(zone.present)}</td>
+                    <td>{chartValue(zone.absent)}</td>
+                    <td>{chartValue(zone.unmarked)}</td>
+                    <td>
+                      <div className={styles["dashboard-zone-rate"]}>
+                        <span>
+                          <i style={{ width: `${Math.min(100, zone.attendanceRate)}%` }} />
+                        </span>
+                        <b>{zone.attendanceRate}%</b>
+                      </div>
+                    </td>
+                    <td>{chartValue(zone.overtimeHours)}</td>
+                    <td>{money(zone.payable)}</td>
+                    <td>{money(zone.paid)}</td>
+                    <td className={styles["dashboard-zone-due"]}>{money(zone.due)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty title="No zone data in this selection" />
+        )}
+      </Panel>
     </>
   );
 }

@@ -51,6 +51,9 @@
 }
 .sidebar nav {
   display: grid;
+  flex: 1;
+  align-content: start;
+  min-height: 0;
   gap: 4px;
 }
 .nav-group {
@@ -99,6 +102,10 @@
   background: #fff0df;
   color: #713900;
   box-shadow: 0 5px 16px rgba(0, 0, 0, 0.14);
+}
+.sidebar nav a.admin-nav-link.active {
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 .profile {
   margin-top: auto;

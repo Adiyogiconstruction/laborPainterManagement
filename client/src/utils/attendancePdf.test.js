@@ -4,6 +4,7 @@ import test from "node:test";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
+  attendanceDaysInMonth,
   attendancePdfLayout,
   createAttendancePdf,
   validateAttendancePdfData,
@@ -19,14 +20,45 @@ const validWorker = {
 
 test("attendance PDF table has fixed 31 day columns within A4 landscape width", () => {
   const layout = validateAttendancePdfData({
-    month: "2026-08",
+    month: "2026-10",
     workers: [validWorker],
   });
 
-  assert.equal(attendancePdfLayout.dayColumnCount, 31);
-  assert.equal(attendancePdfLayout.columnWidthsMm.length, 37);
+  assert.equal(layout.dayCount, 31);
+  assert.equal(layout.columnWidthsMm.length, 37);
   assert.ok(Math.abs(layout.tableWidthMm - 286.74) < 0.000001);
   assert.ok(layout.tableWidthMm <= layout.printableWidthMm);
+});
+
+test("attendance PDF uses the selected month's exact number of days, including leap years", () => {
+  const cases = [
+    ["2026-09", 30],
+    ["2026-10", 31],
+    ["2026-02", 28],
+    ["2024-02", 29],
+  ];
+  for (const [month, dayCount] of cases) {
+    assert.equal(attendanceDaysInMonth(month), dayCount);
+    const layout = validateAttendancePdfData({
+      month,
+      workers: [
+        {
+          ...validWorker,
+          attendance: Array(dayCount).fill("P"),
+        },
+      ],
+    });
+    assert.equal(layout.dayCount, dayCount);
+    assert.equal(layout.columnWidthsMm.length, dayCount + 6);
+  }
+  assert.throws(
+    () =>
+      validateAttendancePdfData({
+        month: "2026-02",
+        workers: [validWorker],
+      }),
+    /incomplete/,
+  );
 });
 
 test("attendance PDF validation rejects invalid month, missing workers, and incomplete days", () => {
@@ -77,7 +109,11 @@ test("fixed-width landscape table paginates vertically and retains selectable te
     showHead: "everyPage",
     styles: { fontSize: 4.2, overflow: "ellipsize", minCellHeight: 4.7 },
     columnStyles: Object.fromEntries(
-      attendancePdfLayout.columnWidthsMm.map((cellWidth, index) => [
+      [
+        ...attendancePdfLayout.fixedColumnWidthsMm.slice(0, 4),
+        ...Array(31).fill(attendancePdfLayout.dayColumnWidthMm),
+        ...attendancePdfLayout.fixedColumnWidthsMm.slice(4),
+      ].map((cellWidth, index) => [
         index,
         { cellWidth },
       ]),
@@ -142,6 +178,12 @@ test("PDF template renders validated attendance data with the fixed landscape la
       doc.lastAutoTable.getWidth(doc.internal.pageSize.getWidth()) <= 287,
     );
     assert.ok(doc.output("arraybuffer").byteLength > 0);
+    const pageHeaderText = doc.internal.pages[1].join("\n");
+    assert.match(pageHeaderText, /Unified Post Tensioning System LLP/);
+    assert.match(pageHeaderText, /A D I Y O G I/);
+    assert.match(pageHeaderText, /ATTENDANCE MONTH:/);
+    assert.match(pageHeaderText, /AUGUST 2026 TEAM 1/);
+    assert.doesNotMatch(pageHeaderText, /GSTIN:|Contact:|Email:/);
     assert.equal(
       doc.lastAutoTable.body.some((row) => row.spansMultiplePages),
       false,
@@ -155,6 +197,44 @@ test("PDF template renders validated attendance data with the fixed landscape la
       new Set(doc.lastAutoTable.body.slice(0, 60).map((row) => row.height)).size,
       1,
     );
+  } finally {
+    globalThis.Image = originalImage;
+    globalThis.document = originalDocument;
+  }
+});
+
+test("attendance PDF uses NA in the TO header without a company filter", async () => {
+  const originalImage = globalThis.Image;
+  const originalDocument = globalThis.document;
+  const logoBase64 = readFileSync(
+    new URL("../assets/image.png", import.meta.url),
+  ).toString("base64");
+  globalThis.Image = class {
+    set src(_value) {
+      this.naturalWidth = 1;
+      this.naturalHeight = 1;
+      queueMicrotask(() => this.onload());
+    }
+  };
+  globalThis.document = {
+    createElement: () => ({
+      getContext: () => ({ drawImage() {} }),
+      toDataURL: () => `data:image/png;base64,${logoBase64}`,
+    }),
+  };
+
+  try {
+    const doc = await createAttendancePdf({
+      month: "2026-10",
+      team: "",
+      workers: [validWorker],
+      fallbackLogoUrl: "/company-logo.png",
+    });
+    const pageHeaderText = doc.internal.pages[1].join("\n");
+    assert.match(pageHeaderText, /\(NA\)/);
+    assert.match(pageHeaderText, /OCTOBER 2026/);
+    assert.doesNotMatch(pageHeaderText, /ALL TEAMS/);
+    assert.doesNotMatch(pageHeaderText, /Adiyogi Construction/);
   } finally {
     globalThis.Image = originalImage;
     globalThis.document = originalDocument;

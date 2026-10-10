@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
+  ChevronLeft,
+  ChevronRight,
   ArrowUpRight,
   Banknote,
   BriefcaseBusiness,
@@ -171,19 +173,26 @@ function ResetPasswordForm({ user, onClose, onSaved }) {
 }
 
 function CompanyProfileForm({ profile, onSaved }) {
-  const [form, setForm] = useState({
-    companyName: profile?.companyName || "",
-    address: profile?.address || "",
-    mobile: profile?.mobile || "",
-    email: profile?.email || "",
-    gstin: profile?.gstin || "",
-    pan: profile?.pan || "",
-    rules: (profile?.rules || []).join("\n"),
+  const formFromProfile = (value) => ({
+    companyName: value?.companyName || "",
+    address: value?.address || "",
+    mobile: value?.mobile || "",
+    email: value?.email || "",
+    gstin: value?.gstin || "",
+    pan: value?.pan || "",
+    rules: (value?.rules || []).join("\n"),
   });
+  const [form, setForm] = useState(() => formFromProfile(profile));
+  const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const update = (field) => (event) =>
     setForm((current) => ({ ...current, [field]: event.target.value }));
+  const cancelEditing = () => {
+    setForm(formFromProfile(profile));
+    setError("");
+    setEditing(false);
+  };
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -198,6 +207,8 @@ function CompanyProfileForm({ profile, onSaved }) {
             .filter(Boolean),
         }),
       );
+      setForm(formFromProfile(savedProfile));
+      setEditing(false);
       onSaved(savedProfile);
     } catch (err) {
       setError(errorMessage(err));
@@ -209,49 +220,107 @@ function CompanyProfileForm({ profile, onSaved }) {
     <Panel
       title="Company and PDF rules"
       detail="These details appear on worker profile PDFs."
+      action={
+        editing ? (
+          <Button
+            type="button"
+            className={`${styles["button-ghost"]}`}
+            onClick={cancelEditing}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            icon={Pencil}
+            className={`${styles["button-secondary"]}`}
+            onClick={() => setEditing(true)}
+          >
+            Edit details
+          </Button>
+        )
+      }
     >
       <form className={`${styles["form-grid"]}`} onSubmit={save}>
         <Field label="Company name">
           <input
             required
+            disabled={!editing || saving}
             value={form.companyName}
             onChange={update("companyName")}
           />
         </Field>
         <Field label="Mobile">
-          <input value={form.mobile} onChange={update("mobile")} />
+          <input
+            disabled={!editing || saving}
+            value={form.mobile}
+            onChange={update("mobile")}
+          />
         </Field>
         <Field label="Email">
-          <input type="email" value={form.email} onChange={update("email")} />
+          <input
+            disabled={!editing || saving}
+            type="email"
+            value={form.email}
+            onChange={update("email")}
+          />
         </Field>
         <Field label="GSTIN">
-          <input value={form.gstin} onChange={update("gstin")} />
+          <input
+            disabled={!editing || saving}
+            value={form.gstin}
+            onChange={update("gstin")}
+          />
         </Field>
         <Field label="PAN">
-          <input value={form.pan} onChange={update("pan")} />
+          <input
+            disabled={!editing || saving}
+            value={form.pan}
+            onChange={update("pan")}
+          />
         </Field>
         <Field label="Address">
-          <input value={form.address} onChange={update("address")} />
+          <input
+            disabled={!editing || saving}
+            value={form.address}
+            onChange={update("address")}
+          />
         </Field>
         <Field label="PDF rules" hint="One rule per line">
-          <textarea rows="6" value={form.rules} onChange={update("rules")} />
+          <textarea
+            disabled={!editing || saving}
+            rows="6"
+            value={form.rules}
+            onChange={update("rules")}
+          />
         </Field>
-        <div className={`${styles["modal-actions"]}`}>
-          <ErrorNote error={error} />
-          <Button className={`${styles["button-primary"]}`} loading={saving}>
-            Save company details
-          </Button>
-        </div>
+        <ErrorNote error={error} />
+        {editing && (
+          <div className={`${styles["modal-actions"]}`}>
+            <Button className={`${styles["button-primary"]}`} loading={saving}>
+              Save company details
+            </Button>
+          </div>
+        )}
       </form>
     </Panel>
   );
 }
 
 export function AdminsPage() {
+  const currentUsageDate = () =>
+    new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
   const [users, setUsers] = useState([]);
+  const [usageRows, setUsageRows] = useState([]);
+  const [usagePeriod, setUsagePeriod] = useState("day");
+  const [usageDate, setUsageDate] = useState(currentUsageDate);
+  const [usageAdmin, setUsageAdmin] = useState("");
+  const [activityPages, setActivityPages] = useState({});
   const [adding, setAdding] = useState(false);
   const [resetting, setResetting] = useState(null);
   const [error, setError] = useState("");
+  const [usageLoading, setUsageLoading] = useState(false);
   const [companyProfile, setCompanyProfile] = useState();
   const dateTime = (value) =>
     value
@@ -267,12 +336,58 @@ export function AdminsPage() {
     request(api.get("/auth/admins/activity"))
       .then(({ admins: list }) => setUsers(list))
       .catch((err) => setError(errorMessage(err)));
+  const loadUsage = async () => {
+    setUsageLoading(true);
+    try {
+      const { admins: list } = await request(
+        api.get("/auth/admins/usage", {
+          params: { period: usagePeriod, date: usageDate },
+        }),
+      );
+      setUsageRows(list);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setUsageLoading(false);
+    }
+  };
   useEffect(() => {
     load();
     request(api.get("/company-profile"))
       .then(({ profile }) => setCompanyProfile(profile))
       .catch((err) => setError(errorMessage(err)));
   }, []);
+  useEffect(() => {
+    loadUsage();
+  }, [usagePeriod, usageDate]);
+  const visibleUsageRows = usageRows.filter(
+    (user) => !usageAdmin || user.id === usageAdmin,
+  );
+  const formatDuration = (milliseconds) => {
+    const totalMinutes = Math.floor(milliseconds / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  };
+  const periodDate = (value) =>
+    new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${value}T00:00:00.000Z`));
+  const periodWeek = (value) => {
+    const start = new Date(`${value}T00:00:00.000Z`);
+    start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 6);
+    return `${periodDate(start.toISOString().slice(0, 10))} – ${periodDate(
+      end.toISOString().slice(0, 10),
+    )}`;
+  };
+  const changeActivityPage = (userId, nextPage) => {
+    setActivityPages((current) => ({ ...current, [userId]: nextPage }));
+  };
   const changeActive = async (user) => {
     try {
       const { user: changed } = await request(
@@ -288,9 +403,7 @@ export function AdminsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="SECURE ACCESS"
         title="Admin access"
-        detail="Only authorised people can view or manage business records."
         action={
           <AddButton
             className={`${styles["button-primary"]}`}
@@ -337,23 +450,133 @@ export function AdminsPage() {
                   <td>
                     {user.role !== "OWNER" && (
                       <div className={`${styles["actions-inline"]}`}>
-                        <button
-                          className={`${styles["text-button"]}`}
+                        <Button
+                          type="button"
+                          className={`${styles["button-secondary"]}`}
                           onClick={() => setResetting(user)}
                         >
                           Reset password
-                        </button>
-                        <button
-                          className={`${styles["text-button"]}`}
+                        </Button>
+                        <Button
+                          type="button"
+                          className={
+                            user.active
+                              ? `${styles["button-danger"]}`
+                              : `${styles["button-primary"]}`
+                          }
                           onClick={() => changeActive(user)}
                         >
                           {user.active ? "Disable" : "Enable"}
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel
+        title="Website usage time"
+        detail="Login-to-logout duration, including idle time. Sessions without logout are counted up to the 8-hour login expiry."
+        action={
+          <Button
+            type="button"
+            className={`${styles["button-secondary"]}`}
+            onClick={loadUsage}
+            loading={usageLoading}
+          >
+            Refresh usage
+          </Button>
+        }
+      >
+        <div className={`${styles["admin-usage-filters"]}`}>
+          <Field label="Period">
+            <select
+              value={usagePeriod}
+              onChange={(event) => setUsagePeriod(event.target.value)}
+            >
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+            </select>
+          </Field>
+          <Field label="Date in period">
+            <input
+              required
+              type="date"
+              value={usageDate}
+              onChange={(event) =>
+                setUsageDate(event.target.value || currentUsageDate())
+              }
+            />
+          </Field>
+          <Field label="Administrator">
+            <select
+              value={usageAdmin}
+              onChange={(event) => setUsageAdmin(event.target.value)}
+            >
+              <option value="">All administrators</option>
+              {usageRows.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p>
+            {usagePeriod === "day"
+              ? periodDate(usageDate)
+              : usagePeriod === "week"
+                ? `Week: ${periodWeek(usageDate)}`
+                : usagePeriod === "month"
+                  ? new Intl.DateTimeFormat("en-IN", {
+                      month: "long",
+                      year: "numeric",
+                      timeZone: "UTC",
+                    }).format(new Date(`${usageDate}T00:00:00.000Z`))
+                  : new Date(`${usageDate}T00:00:00.000Z`).getUTCFullYear()}
+          </p>
+        </div>
+        <ErrorNote error={error} />
+        <div className={`${styles["table-wrap"]}`}>
+          <table>
+            <thead>
+              <tr>
+                <th>Administrator</th>
+                <th>Time used</th>
+                <th>Sessions</th>
+                <th>Current status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleUsageRows.length ? (
+                visibleUsageRows.map((user) => (
+                  <tr key={user.id}>
+                    <td>
+                      <strong>{user.name}</strong>
+                      <small>{user.role}</small>
+                    </td>
+                    <td>{formatDuration(user.totalMilliseconds)}</td>
+                    <td>{user.sessionCount}</td>
+                    <td>
+                      {user.activeSessionCount
+                        ? `${user.activeSessionCount} active now`
+                        : "Not active now"}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4">
+                    {usageLoading
+                      ? "Loading usage…"
+                      : "No website usage recorded for this period."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -391,38 +614,48 @@ export function AdminsPage() {
                   <td>{dateTime(user.lastLoginAt)}</td>
                   <td>{dateTime(user.lastLogoutAt)}</td>
                   <td>
-                    {user.recentChanges?.length ? (
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "6px",
-                          maxWidth: "360px",
-                        }}
-                      >
-                        {user.recentChanges.slice(0, 3).map((event) => (
-                          <div
-                            key={`${user.id}-${event.createdAt}-${event.message}`}
-                            style={{
-                              display: "grid",
-                              gap: "2px",
-                              padding: "6px 8px",
-                              borderRadius: "8px",
-                              background: "#f6faf9",
-                              border: "1px solid #edf2f0",
-                            }}
-                          >
-                            <small
-                              style={{ color: "#526662", fontWeight: 700 }}
-                            >
-                              {dateTime(event.createdAt)}
-                            </small>
-                            <span style={{ fontSize: "11px", lineHeight: 1.4 }}>
-                              {event.message}
-                            </span>
+                    {user.recentChanges?.length ? (() => {
+                      const page = Math.min(
+                        activityPages[user.id] || 0,
+                        user.recentChanges.length - 1,
+                      );
+                      const event = user.recentChanges[page];
+                      return (
+                        <div className={`${styles["admin-activity-change"]}`}>
+                          <div className={`${styles["admin-activity-entry"]}`}>
+                            <small>{dateTime(event.createdAt)}</small>
+                            <span>{event.message}</span>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
+                          <div className={`${styles["admin-activity-pager"]}`}>
+                            <button
+                              type="button"
+                              className={`${styles["button-secondary"]}`}
+                              aria-label={`Previous change for ${user.name}`}
+                              onClick={() =>
+                                changeActivityPage(user.id, page - 1)
+                              }
+                              disabled={page === 0}
+                            >
+                              <ChevronLeft size={14} />
+                            </button>
+                            <small>
+                              {page + 1} / {user.recentChanges.length}
+                            </small>
+                            <button
+                              type="button"
+                              className={`${styles["button-secondary"]}`}
+                              aria-label={`Next change for ${user.name}`}
+                              onClick={() =>
+                                changeActivityPage(user.id, page + 1)
+                              }
+                              disabled={page >= user.recentChanges.length - 1}
+                            >
+                              <ChevronRight size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })() : (
                       <span style={{ color: "#7a8c89", fontSize: "11px" }}>
                         No admin changes recorded.
                       </span>
@@ -432,28 +665,6 @@ export function AdminsPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      </Panel>
-      <Panel title="How roles work">
-        <div className={`${styles["role-grid"]}`}>
-          <div>
-            <strong>Owner</strong>
-            <p>
-              Full control, including adding administrators and viewing every
-              report.
-            </p>
-          </div>
-          <div>
-            <strong>Admin</strong>
-            <p>Can add and update workers, attendance and payments.</p>
-          </div>
-          <div>
-            <strong>Viewer</strong>
-            <p>
-              Can securely review records and reports without editing financial
-              data.
-            </p>
-          </div>
         </div>
       </Panel>
       {companyProfile && (
@@ -468,6 +679,7 @@ export function AdminsPage() {
           onSaved={(user) => {
             setAdding(false);
             setUsers((current) => [user, ...current]);
+            loadUsage();
           }}
         />
       )}

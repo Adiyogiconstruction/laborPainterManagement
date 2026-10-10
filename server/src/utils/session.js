@@ -1,13 +1,13 @@
 import { parseCookie, stringifySetCookie } from "cookie";
 
 export const SESSION_COOKIE = "workledger_session";
-const sessionMaxAge = 8 * 60 * 60;
+export const SESSION_DURATION_SECONDS = 8 * 60 * 60;
 
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: process.env.COOKIE_SAME_SITE || "lax",
-  maxAge: sessionMaxAge,
+  maxAge: SESSION_DURATION_SECONDS,
   path: "/",
 };
 

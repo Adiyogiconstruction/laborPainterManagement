@@ -161,7 +161,7 @@ export function LoginPage({ onAuthenticated }) {
               onChange={(e) =>
                 setForm({ ...form, captchaCode: e.target.value.toUpperCase() })
               }
-              placeholder="Enter the 6-character code"
+              placeholder="6-character code"
             />
           </label>
           {error && <p className={`${styles["form-error"]}`}>{error}</p>}

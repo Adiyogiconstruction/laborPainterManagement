@@ -1,11 +1,21 @@
 import { Router } from "express";
 import User from "../models/User.js";
 import AdminActivity from "../models/AdminActivity.js";
+import AdminSession from "../models/AdminSession.js";
 import { allowRoles, requireAuth, signToken } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { safeUser } from "../utils/serializers.js";
 import { rateLimit } from "express-rate-limit";
-import { clearSessionCookie, setSessionCookie } from "../utils/session.js";
+import {
+  clearSessionCookie,
+  SESSION_DURATION_SECONDS,
+  setSessionCookie,
+} from "../utils/session.js";
+import {
+  currentUsageDate,
+  getUsagePeriodRange,
+  summarizeAdminUsage,
+} from "../utils/adminUsage.js";
 import {
   summarizeAdminActivity,
   recordAdminActivity,
@@ -16,6 +26,16 @@ import {
 } from "../utils/captcha.js";
 
 const router = Router();
+const startAdminSession = async (user) => {
+  const startedAt = new Date();
+  return AdminSession.create({
+    user: user._id,
+    startedAt,
+    expiresAt: new Date(
+      startedAt.getTime() + SESSION_DURATION_SECONDS * 1000,
+    ),
+  });
+};
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
@@ -69,7 +89,8 @@ router.post(
       "SETUP",
       `${user.name} completed the workspace setup.`,
     );
-    setSessionCookie(res, signToken(user));
+    const session = await startAdminSession(user);
+    setSessionCookie(res, signToken(user, session.id));
     res.status(201).json({ user: safeUser(user) });
   }),
 );
@@ -104,7 +125,8 @@ router.post(
       action: "LOGIN",
       message: `${user.name} logged in successfully.`,
     });
-    setSessionCookie(res, signToken(user));
+    const session = await startAdminSession(user);
+    setSessionCookie(res, signToken(user, session.id));
     res.json({ user: safeUser(user) });
   }),
 );
@@ -113,6 +135,16 @@ router.post(
   "/logout",
   requireAuth,
   asyncHandler(async (req, res) => {
+    if (req.sessionId) {
+      await AdminSession.updateOne(
+        {
+          _id: req.sessionId,
+          user: req.user._id,
+          endedAt: null,
+        },
+        { $set: { endedAt: new Date() } },
+      );
+    }
     await AdminActivity.create({
       user: req.user._id,
       userName: req.user.name,
@@ -163,6 +195,62 @@ router.get(
   }),
 );
 
+router.get(
+  "/admins/usage",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (req, res) => {
+    const period = String(req.query.period || "day");
+    const dateValue = req.query.date || currentUsageDate();
+    let range;
+    try {
+      range = getUsagePeriodRange(period, String(dateValue));
+    } catch (error) {
+      throw new ApiError(400, error.message);
+    }
+
+    const now = new Date();
+    const currentPeriodEnd = new Date(
+      Math.min(range.end.getTime(), now.getTime()),
+    );
+    const [users, sessions] = await Promise.all([
+      User.find().sort({ createdAt: -1 }),
+      currentPeriodEnd > range.start
+        ? AdminSession.find({
+            startedAt: { $lt: currentPeriodEnd },
+            expiresAt: { $gt: range.start },
+            $or: [{ endedAt: null }, { endedAt: { $gt: range.start } }],
+          }).select("user startedAt expiresAt endedAt")
+        : [],
+    ]);
+    const sessionsByUser = new Map();
+    for (const session of sessions) {
+      const key = String(session.user);
+      if (!sessionsByUser.has(key)) sessionsByUser.set(key, []);
+      sessionsByUser.get(key).push(session);
+    }
+
+    res.json({
+      period,
+      date: String(dateValue),
+      start: range.start,
+      end: range.end,
+      admins: users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        active: user.active,
+        ...summarizeAdminUsage(
+          sessionsByUser.get(String(user._id)) || [],
+          range.start,
+          range.end,
+          now,
+        ),
+      })),
+    });
+  }),
+);
+
 router.post(
   "/admins",
   requireAuth,
@@ -209,6 +297,12 @@ router.patch(
       if (req.body[field] !== undefined) user[field] = req.body[field];
     });
     await user.save();
+    if (previousActive && user.active === false) {
+      await AdminSession.updateMany(
+        { user: user._id, endedAt: null },
+        { $set: { endedAt: new Date() } },
+      );
+    }
     if (req.body.role !== undefined && req.body.role !== previousRole) {
       await recordAdminActivity(
         req,

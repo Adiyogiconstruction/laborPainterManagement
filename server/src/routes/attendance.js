@@ -45,6 +45,7 @@ router.get(
     const workers = await Worker.find({
       active: true,
       type,
+      deletedAt: null,
     }).sort({ name: 1 });
 
     const records = await Attendance.find({
@@ -156,6 +157,7 @@ router.get(
       Worker.find({
         active: true,
         type,
+        deletedAt: null,
       }).sort({ name: 1 }),
       Attendance.find({
         type,
@@ -213,7 +215,11 @@ router.post(
       ...new Set(entries.map((entry) => String(entry.worker))),
     ];
     const [workers, existingRecords] = await Promise.all([
-      Worker.find({ _id: { $in: workerIds }, active: true }),
+      Worker.find({
+        _id: { $in: workerIds },
+        active: true,
+        deletedAt: null,
+      }),
       Attendance.find({
         worker: { $in: workerIds },
         date: { $gte: start, $lt: end },
@@ -330,7 +336,10 @@ router.put(
       );
     }
 
-    const workerRecord = await Worker.findById(worker);
+    const workerRecord = await Worker.findOne({
+      _id: worker,
+      deletedAt: null,
+    });
     if (!workerRecord) throw new ApiError(404, "Worker not found.");
     const workerType = workerRecord.type;
     const baseDate = asDateOnly(date);

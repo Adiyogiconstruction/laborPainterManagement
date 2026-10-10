@@ -7,17 +7,53 @@ import { dateRange } from "../utils/serializers.js";
 
 const router = Router();
 
+const validDateOnly = (value) => {
+  if (!value) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
+const validateDateRange = (query) => {
+  if (!validDateOnly(query.from) || !validDateOnly(query.to)) {
+    return false;
+  }
+  return !(query.from && query.to && query.from > query.to);
+};
+
+const addWorkerAttributeFilter = (workerFilter, field, value) => {
+  if (!value) return;
+  workerFilter[field] =
+    value === "Unassigned" ? { $in: ["", null] } : value;
+};
+
 router.get(
   "/operations",
   asyncHandler(async (req, res) => {
-    const paymentFilter = {};
-    const workerFilter = { type: req.query.type || "LABOUR" };
+    if (!validateDateRange(req.query)) {
+      return res.status(400).json({ message: "Choose a valid report date range." });
+    }
+    const paymentFilter = { deletedAt: null };
+    const workerFilter = { type: req.query.type || "LABOUR", deletedAt: null };
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
-      if (req.query[field]) workerFilter[field] = req.query[field];
+      addWorkerAttributeFilter(workerFilter, field, req.query[field]);
     }
     if (req.query.worker) workerFilter._id = req.query.worker;
     const scopedWorkers = await Worker.find(workerFilter).select("_id");
-    paymentFilter.worker = { $in: scopedWorkers.map((worker) => worker._id) };
+    const workerIds = scopedWorkers.map((worker) => worker._id);
+    const hasWorkforceFilter = Boolean(
+      req.query.worker ||
+        req.query.companyName ||
+        req.query.teamName ||
+        req.query.workZone ||
+        req.query.skill,
+    );
+    paymentFilter.$or = [
+      { worker: { $in: workerIds } },
+      ...(!hasWorkforceFilter
+        ? [{ flow: "OUTFLOW", kind: "EXPENSE" }]
+        : []),
+    ];
     if (req.query.kind) paymentFilter.kind = req.query.kind;
     if (req.query.method) paymentFilter.method = req.query.method;
     const range = dateRange(req.query);
@@ -29,7 +65,11 @@ router.get(
       (summary, payment) => {
         summary.inflow += payment.flow === "INFLOW" ? payment.amount : 0;
         summary.outflow += payment.flow === "OUTFLOW" ? payment.amount : 0;
-        summary.advance += payment.kind === "ADVANCE" ? payment.amount : 0;
+        summary.advance +=
+          payment.flow === "OUTFLOW" &&
+          ["ADVANCE", "TRAVEL_ADVANCE"].includes(payment.kind)
+            ? payment.amount
+            : 0;
         return summary;
       },
       { inflow: 0, outflow: 0, advance: 0 },
@@ -46,6 +86,9 @@ router.get(
 router.get(
   "/attendance",
   asyncHandler(async (req, res) => {
+    if (!validateDateRange(req.query)) {
+      return res.status(400).json({ message: "Choose a valid report date range." });
+    }
     const type = "LABOUR";
     const from =
       req.query.from ||
@@ -57,9 +100,9 @@ router.get(
       new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
         .toISOString()
         .slice(0, 10);
-    const workerFilter = { active: true, type };
+    const workerFilter = { active: true, deletedAt: null, type };
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
-      if (req.query[field]) workerFilter[field] = req.query[field];
+      addWorkerAttributeFilter(workerFilter, field, req.query[field]);
     }
     if (req.query.worker) workerFilter._id = req.query.worker;
     const workers = await Worker.find(workerFilter).sort({ name: 1 });
@@ -130,14 +173,20 @@ router.get(
       };
     });
 
-    const summary = rows.reduce(
+    const summary = workerSummaries.reduce(
       (accumulator, item) => {
-        accumulator[item.status] = (accumulator[item.status] || 0) + 1;
-        accumulator.payable += Number(item.payableAmount || 0);
+        accumulator.PRESENT += item.PRESENT;
+        accumulator.DOUBLE_PRESENT += item.DOUBLE_PRESENT;
+        accumulator.ABSENT += item.ABSENT;
+        accumulator.HALF_DAY += item.HALF_DAY;
+        accumulator.LEAVE += item.LEAVE;
+        accumulator.NOT_MARKED += item.NOT_MARKED;
+        accumulator.payable += item.payable;
         return accumulator;
       },
       {
         PRESENT: 0,
+        DOUBLE_PRESENT: 0,
         HALF_DAY: 0,
         ABSENT: 0,
         LEAVE: 0,

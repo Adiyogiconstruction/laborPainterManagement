@@ -1,7 +1,10 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
-import { getSessionToken } from "../utils/session.js";
+import {
+  getSessionToken,
+  SESSION_DURATION_SECONDS,
+} from "../utils/session.js";
 
 const secret = () => {
   if (!process.env.JWT_SECRET) {
@@ -12,10 +15,14 @@ const secret = () => {
   return process.env.JWT_SECRET;
 };
 
-export function signToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role }, secret(), {
-    expiresIn: "8h",
-  });
+export function signToken(user, sessionId) {
+  return jwt.sign(
+    { sub: user.id, role: user.role, ...(sessionId ? { sid: sessionId } : {}) },
+    secret(),
+    {
+      expiresIn: `${SESSION_DURATION_SECONDS}s`,
+    },
+  );
 }
 
 export const requireAuth = asyncHandler(async (req, _res, next) => {
@@ -28,6 +35,7 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
     if (!user || !user.active)
       throw new ApiError(401, "This account is no longer active.");
     req.user = user;
+    req.sessionId = payload.sid || null;
     next();
   } catch (error) {
     if (error instanceof ApiError) throw error;

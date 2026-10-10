@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -42,14 +42,80 @@ import {
   typeTitle,
 } from "./shared.jsx";
 
+const localDateInput = (value) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const currentMonthStart = () => {
+  const now = new Date();
+  return localDateInput(new Date(now.getFullYear(), now.getMonth(), 1));
+};
+
+function ReportPagination({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (!total) return null;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const first = (currentPage - 1) * pageSize + 1;
+  const last = Math.min(currentPage * pageSize, total);
+  return (
+    <div className={styles["workforce-pagination"]}>
+      <label>
+        Show
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          aria-label="Report rows per page"
+        >
+          <option value={10}>10</option>
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+        </select>
+        rows
+      </label>
+      <span>
+        Showing {first}–{last} of {total}
+      </span>
+      <div>
+        <button
+          type="button"
+          className={styles["button-secondary"]}
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className={styles["button-secondary"]}
+          disabled={currentPage >= pageCount}
+          onClick={() => onPageChange(currentPage + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ReportsPage() {
+  const [searchParams] = useSearchParams();
   const type = "LABOUR";
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(currentMonthStart);
+  const [to, setTo] = useState(() => localDateInput(new Date()));
   const [data, setData] = useState();
   const [attendanceData, setAttendanceData] = useState();
-  const [attendanceWorkers, setAttendanceWorkers] = useState([]);
-  const [attendanceWorker, setAttendanceWorker] = useState("");
+  const [attendanceWorker, setAttendanceWorker] = useState(
+    () => searchParams.get("worker") || "",
+  );
   const [reportTab, setReportTab] = useState("ATTENDANCE");
   const [analyticsData, setAnalyticsData] = useState();
   const [workerOptions, setWorkerOptions] = useState([]);
@@ -61,9 +127,20 @@ export function ReportsPage() {
   const [paymentMethod, setPaymentMethod] = useState("");
   const [expandedWorker, setExpandedWorker] = useState("");
   const [attendancePrintMode, setAttendancePrintMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [pageSize, setPageSize] = useState(25);
+  const [pages, setPages] = useState({});
   const [error, setError] = useState("");
+  const loadSequence = useRef(0);
+  const previousPrintPageSize = useRef(null);
   useEffect(() => {
-    const handleAfterPrint = () => setAttendancePrintMode(false);
+    const handleAfterPrint = () => {
+      setAttendancePrintMode(false);
+      if (previousPrintPageSize.current !== null) {
+        setPageSize(previousPrintPageSize.current);
+        previousPrintPageSize.current = null;
+      }
+    };
     window.addEventListener("afterprint", handleAfterPrint);
     return () => window.removeEventListener("afterprint", handleAfterPrint);
   }, []);
@@ -72,11 +149,26 @@ export function ReportsPage() {
     return () => document.body.classList.remove("attendance-pdf-mode");
   }, [attendancePrintMode]);
   const printAttendanceReport = () => {
+    previousPrintPageSize.current = pageSize;
+    setPageSize(Math.max(25, attendanceData?.workerSummaries?.length || 0));
+    setPages((current) => ({ ...current, attendance: 1 }));
     setAttendancePrintMode(true);
     window.setTimeout(() => window.print(), 0);
   };
   const load = () => {
+    const sequence = ++loadSequence.current;
     setError("");
+    if (!from || !to) {
+      setLoading(false);
+      setError("Select both a from date and a to date.");
+      return Promise.resolve();
+    }
+    if (from > to) {
+      setLoading(false);
+      setError("From date must be on or before To date.");
+      return Promise.resolve();
+    }
+    setLoading(true);
     return Promise.all([
       request(
         api.get("/reports/operations", {
@@ -99,7 +191,11 @@ export function ReportsPage() {
           params: {
             from,
             to,
-            ...(attendanceWorker ? { worker: attendanceWorker } : {}),
+            worker: attendanceWorker,
+            companyName: companyFilter,
+            teamName: teamFilter,
+            workZone: workZoneFilter,
+            skill: skillFilter,
           },
         }),
       ),
@@ -120,28 +216,96 @@ export function ReportsPage() {
       ),
     ])
       .then(([operations, attendance, analytics]) => {
+        if (sequence !== loadSequence.current) return;
         setData(operations);
         setAttendanceData(attendance);
         setAnalyticsData(analytics);
-        if (!attendanceWorker)
-          setAttendanceWorkers(attendance.workerSummaries || []);
         setExpandedWorker("");
       })
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => {
+        if (sequence === loadSequence.current) setError(errorMessage(err));
+      })
+      .finally(() => {
+        if (sequence === loadSequence.current) setLoading(false);
+      });
   };
   useEffect(() => {
-    load();
-  }, []);
+    loadSequence.current += 1;
+    const timer = window.setTimeout(() => load(), 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    from,
+    to,
+    attendanceWorker,
+    companyFilter,
+    teamFilter,
+    workZoneFilter,
+    skillFilter,
+    paymentKind,
+    paymentMethod,
+  ]);
+  useEffect(() => {
+    setPages({});
+    setExpandedWorker("");
+  }, [
+    from,
+    to,
+    attendanceWorker,
+    companyFilter,
+    teamFilter,
+    workZoneFilter,
+    skillFilter,
+    paymentKind,
+    paymentMethod,
+  ]);
   useEffect(() => {
     request(api.get("/workers", { params: { type } }))
       .then(({ workers: result }) => setWorkerOptions(result || []))
       .catch((err) => setError(errorMessage(err)));
   }, [type]);
-  const summary = data?.summary || {
-    inflow: 0,
-    outflow: 0,
-    advance: 0,
+  const rowsForPage = (key, rows = []) => {
+    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+    const page = Math.min(pages[key] || 1, pageCount);
+    return {
+      rows: rows.slice((page - 1) * pageSize, page * pageSize),
+      page,
+    };
   };
+  const changePage = (key, page) =>
+    setPages((current) => ({ ...current, [key]: page }));
+  const changePageSize = (value) => {
+    setPageSize(value);
+    setPages({});
+  };
+  const attendancePage = rowsForPage(
+    "attendance",
+    attendanceData?.workerSummaries || [],
+  );
+  const payrollPage = rowsForPage("payroll", data?.payments || []);
+  const exceptionPage = rowsForPage(
+    "exceptions",
+    analyticsData?.exceptions || [],
+  );
+  const payrollSummaryPage = rowsForPage(
+    "payroll-summary",
+    Object.entries(analyticsData?.paymentKinds || {}),
+  );
+  const managementPage = rowsForPage(
+    "management",
+    analyticsData?.managementWorkers || [],
+  );
+  const workforceDimensions = ["company", "team", "workZone", "skill"].map(
+    (dimension) => {
+      const entries = Object.entries(
+        analyticsData?.composition?.[dimension] || {},
+      ).sort((left, right) => right[1] - left[1]);
+      return {
+        dimension,
+        ...rowsForPage(`workforce-${dimension}`, entries),
+        total: entries.length,
+      };
+    },
+  );
   return (
     <div className={attendancePrintMode ? "attendance-print-root" : undefined}>
       <PageHeader
@@ -160,11 +324,12 @@ export function ReportsPage() {
       />
       <Panel
         title="Report filters"
-        detail="Apply a date range to inspect a particular period."
+        detail="Reports refresh automatically when filters change. Select both dates and use Apply filters to refresh manually."
       >
         <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
           <Field label="From date">
             <input
+              required
               type="date"
               value={from}
               onChange={(event) => setFrom(event.target.value)}
@@ -172,6 +337,7 @@ export function ReportsPage() {
           </Field>
           <Field label="To date">
             <input
+              required
               type="date"
               value={to}
               onChange={(event) => setTo(event.target.value)}
@@ -191,22 +357,21 @@ export function ReportsPage() {
             </select>
           </Field>
           {[
-            ["Company", companyFilter, setCompanyFilter, "companyName"],
-            ["Team", teamFilter, setTeamFilter, "teamName"],
-            ["Location", workZoneFilter, setWorkZoneFilter, "workZone"],
-            ["Skill", skillFilter, setSkillFilter, "skill"],
-          ].map(([label, value, setter, field]) => (
+            ["Company", "companies", companyFilter, setCompanyFilter, "companyName"],
+            ["Team", "teams", teamFilter, setTeamFilter, "teamName"],
+            ["Location", "locations", workZoneFilter, setWorkZoneFilter, "workZone"],
+            ["Skill", "skills", skillFilter, setSkillFilter, "skill"],
+          ].map(([label, pluralLabel, value, setter, field]) => (
             <Field label={label} key={field}>
               <select
                 value={value}
                 onChange={(event) => setter(event.target.value)}
               >
-                <option value="">All {label.toLowerCase()}s</option>
+                <option value="">All {pluralLabel}</option>
                 {[
                   ...new Set(
                     workerOptions
-                      .map((worker) => worker[field])
-                      .filter(Boolean),
+                      .map((worker) => worker[field] || "Unassigned"),
                   ),
                 ]
                   .sort()
@@ -228,6 +393,7 @@ export function ReportsPage() {
               <option value="ADVANCE">Advance</option>
               <option value="TRAVEL_ADVANCE">Travel advance</option>
               <option value="EXPENSE">Kharchi</option>
+              <option value="REFUND">Labour return</option>
               <option value="ADJUSTMENT">Adjustment</option>
               <option value="OTHER">Other</option>
             </select>
@@ -249,8 +415,9 @@ export function ReportsPage() {
             icon={RefreshCcw}
             className={`${styles["button-primary"]}`}
             onClick={load}
+            disabled={loading}
           >
-            Apply filters
+            {loading ? "Applying…" : "Apply filters"}
           </Button>
         </div>
         <ErrorNote error={error} />
@@ -282,7 +449,7 @@ export function ReportsPage() {
       {reportTab === "ATTENDANCE" && (
         <Panel
           title="Attendance report"
-          detail="Compare every active labour worker across the selected period."
+          detail="Attendance, unmarked days and attendance-based payable for matching active labour."
           className="attendance-report-panel"
           action={
             <div className="attendance-print-action">
@@ -297,6 +464,27 @@ export function ReportsPage() {
             </div>
           }
         >
+          <div className={styles["report-summary-grid"]}>
+            {[
+              ["Workers", attendanceData?.workerSummaries?.length || 0],
+              ["Present", attendanceData?.summary?.PRESENT || 0],
+              ["Absent", attendanceData?.summary?.ABSENT || 0],
+              ["Unmarked", attendanceData?.summary?.NOT_MARKED || 0],
+              ["Payable", money(attendanceData?.summary?.payable || 0)],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+          <ReportPagination
+            total={attendanceData?.workerSummaries?.length || 0}
+            page={attendancePage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("attendance", page)}
+            onPageSizeChange={changePageSize}
+          />
           <div className={`${styles["table-wrap"]}`}>
             <table>
               <thead>
@@ -313,8 +501,12 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {attendanceData?.workerSummaries?.map((worker) => {
+                {attendancePage.rows.map((worker) => {
                   const isExpanded = expandedWorker === worker.workerId;
+                  const dailyPage = rowsForPage(
+                    `attendance-days-${worker.workerId}`,
+                    worker.records,
+                  );
                   return (
                     <Fragment key={worker.workerId}>
                       <tr>
@@ -368,7 +560,7 @@ export function ReportsPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {worker.records.map((record) => (
+                                  {dailyPage.rows.map((record) => (
                                     <tr
                                       key={`${worker.workerId}-${record.date}`}
                                     >
@@ -383,6 +575,18 @@ export function ReportsPage() {
                                 </tbody>
                               </table>
                             </div>
+                            <ReportPagination
+                              total={worker.records.length}
+                              page={dailyPage.page}
+                              pageSize={pageSize}
+                              onPageChange={(page) =>
+                                changePage(
+                                  `attendance-days-${worker.workerId}`,
+                                  page,
+                                )
+                              }
+                              onPageSizeChange={changePageSize}
+                            />
                           </td>
                         </tr>
                       )}
@@ -402,7 +606,30 @@ export function ReportsPage() {
         </Panel>
       )}
       {reportTab === "PAYROLL" && (
-        <Panel title="Payment ledger" detail="Money paid to the workforce.">
+        <Panel
+          title="Payment ledger"
+          detail="Selected-period outflows, returns, advances and business expenses."
+        >
+          <div className={styles["report-summary-grid"]}>
+            {[
+              ["Transactions", data?.payments?.length || 0],
+              ["Paid out", money(data?.summary?.outflow || 0)],
+              ["Received", money(data?.summary?.inflow || 0)],
+              ["Advances", money(data?.summary?.advance || 0)],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+          <ReportPagination
+            total={data?.payments?.length || 0}
+            page={payrollPage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("payroll", page)}
+            onPageSizeChange={changePageSize}
+          />
           <div className={`${styles["table-wrap"]}`}>
             <table>
               <thead>
@@ -410,23 +637,37 @@ export function ReportsPage() {
                   <th>Date</th>
                   <th>Worker</th>
                   <th>Type</th>
-                  <th>Amount</th>
+                  <th>Diya</th>
+                  <th>Liya</th>
                 </tr>
               </thead>
               <tbody>
-                {data?.payments?.map((payment) => (
+                {payrollPage.rows.map((payment) => (
                   <tr key={payment._id}>
                     <td>{date(payment.paidOn)}</td>
                     <td>{payment.worker?.name || "Business expense"}</td>
-                    <td>{payment.kind.replace("_", " ")}</td>
-                    <td className={`${styles["amount"]} ${styles["expense"]}`}>
-                      {money(payment.amount)}
+                    <td>
+                      {payment.flow === "INFLOW"
+                        ? `Liya · ${payment.kind.replace("_", " ")}`
+                        : payment.kind.replace("_", " ")}
+                    </td>
+                    <td
+                      className={
+                        payment.flow === "INFLOW"
+                          ? undefined
+                          : `${styles["amount"]} ${styles["expense"]}`
+                      }
+                    >
+                      {payment.flow === "INFLOW" ? "—" : money(payment.amount)}
+                    </td>
+                    <td className={`${styles["income"]}`}>
+                      {payment.flow === "INFLOW" ? money(payment.amount) : "—"}
                     </td>
                   </tr>
                 ))}
                 {!data?.payments?.length && (
                   <tr>
-                    <td colSpan="4">
+                    <td colSpan="5">
                       <Empty title="No payments for this filter" />
                     </td>
                   </tr>
@@ -494,21 +735,29 @@ export function ReportsPage() {
       )}
       {analyticsData && reportTab === "WORKFORCE" && (
         <div className={`${styles["content-grid"]} ${styles["two-one"]}`}>
-          {["company", "team", "workZone", "skill"].map((dimension) => (
+          {workforceDimensions.map(({ dimension, rows, page, total }) => (
             <Panel
               title={`${dimension === "workZone" ? "Location" : dimension} distribution`}
               key={dimension}
             >
               <div className={`${styles["report-rank-list"]}`}>
-                {Object.entries(analyticsData.composition?.[dimension] || {})
-                  .sort((left, right) => right[1] - left[1])
-                  .map(([label, count]) => (
-                    <div key={label}>
-                      <strong>{label}</strong>
-                      <span>{count}</span>
-                    </div>
-                  ))}
+                {rows.map(([label, count]) => (
+                  <div key={label}>
+                    <strong>{label}</strong>
+                    <span>{count}</span>
+                  </div>
+                ))}
+                {!total && <Empty title="No matching workforce data" />}
               </div>
+              <ReportPagination
+                total={total}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={(nextPage) =>
+                  changePage(`workforce-${dimension}`, nextPage)
+                }
+                onPageSizeChange={changePageSize}
+              />
             </Panel>
           ))}
         </div>
@@ -516,8 +765,15 @@ export function ReportsPage() {
       {analyticsData && reportTab === "EXCEPTIONS" && (
         <Panel
           title="Attendance exceptions"
-          detail="Workers needing follow-up in the selected period."
+          detail="Workers with absences, leave, half-days, overtime or unmarked attendance in this period."
         >
+          <ReportPagination
+            total={analyticsData.exceptions?.length || 0}
+            page={exceptionPage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("exceptions", page)}
+            onPageSizeChange={changePageSize}
+          />
           <div className={`${styles["table-wrap"]}`}>
             <table>
               <thead>
@@ -531,7 +787,7 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {analyticsData.exceptions?.map((item) => (
+                {exceptionPage.rows.map((item) => (
                   <tr key={item.workerId}>
                     <td>
                       <strong>{item.workerName}</strong>
@@ -558,10 +814,17 @@ export function ReportsPage() {
       {analyticsData && reportTab === "PAYROLL" && (
         <Panel
           title="Payment summary"
-          detail="Payment type totals for the selected period."
+          detail="Net type totals for matching payments; incoming refunds and adjustments reduce the total."
         >
+          <ReportPagination
+            total={Object.keys(analyticsData.paymentKinds || {}).length}
+            page={payrollSummaryPage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("payroll-summary", page)}
+            onPageSizeChange={changePageSize}
+          />
           <div className={`${styles["report-summary-grid"]}`}>
-            {Object.entries(analyticsData.paymentKinds || {}).map(
+            {payrollSummaryPage.rows.map(
               ([kind, amount]) => (
                 <div key={kind}>
                   <span>{kind.replaceAll("_", " ")}</span>
@@ -572,6 +835,67 @@ export function ReportsPage() {
             {!Object.keys(analyticsData.paymentKinds || {}).length && (
               <Empty title="No payments in this period" />
             )}
+          </div>
+        </Panel>
+      )}
+      {analyticsData && reportTab === "MANAGEMENT" && (
+        <Panel
+          title="Worker management details"
+          detail="Period attendance/payables and payments alongside each worker's lifetime due."
+        >
+          <ReportPagination
+            total={analyticsData.managementWorkers?.length || 0}
+            page={managementPage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("management", page)}
+            onPageSizeChange={changePageSize}
+          />
+          <div className={styles["table-wrap"]}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Company</th>
+                  <th>Team</th>
+                  <th>Location</th>
+                  <th>Present</th>
+                  <th>Absent</th>
+                  <th>Half day</th>
+                  <th>Leave</th>
+                  <th>Unmarked</th>
+                  <th>OT hours</th>
+                  <th>Period payable</th>
+                  <th>Period paid</th>
+                  <th>Lifetime due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managementPage.rows.map((worker) => (
+                  <tr key={worker.workerId}>
+                    <td><strong>{worker.workerName}</strong></td>
+                    <td>{worker.company}</td>
+                    <td>{worker.team}</td>
+                    <td>{worker.location}</td>
+                    <td>{worker.present}</td>
+                    <td>{worker.absent}</td>
+                    <td>{worker.halfDay}</td>
+                    <td>{worker.leave}</td>
+                    <td>{worker.unmarked}</td>
+                    <td>{worker.overtimeHours}</td>
+                    <td>{money(worker.payable)}</td>
+                    <td>{money(worker.paid)}</td>
+                    <td>{money(worker.lifetimeDue)}</td>
+                  </tr>
+                ))}
+                {!analyticsData.managementWorkers?.length && (
+                  <tr>
+                    <td colSpan="13">
+                      <Empty title="No workers match these filters" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </Panel>
       )}

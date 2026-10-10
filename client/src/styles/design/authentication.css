@@ -88,6 +88,10 @@
   text-transform: uppercase;
   letter-spacing: 0.14em;
 }
+.field input.delete-confirm-code {
+  text-transform: none;
+  letter-spacing: normal;
+}
 .brand-mobile {
   display: none;
   width: 145px;

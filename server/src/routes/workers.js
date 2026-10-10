@@ -105,10 +105,25 @@ router.get(
         {
           $match: {
             worker: { $in: workerIds },
-            flow: "OUTFLOW",
+            deletedAt: null,
           },
         },
-        { $group: { _id: "$worker", totalPaid: { $sum: "$amount" } } },
+        {
+          $group: {
+            _id: "$worker",
+            totalPaid: {
+              $sum: {
+                $cond: [{ $eq: ["$flow", "OUTFLOW"] }, "$amount", 0],
+              },
+            },
+            totalReturned: {
+              $sum: {
+                $cond: [{ $eq: ["$flow", "INFLOW"] }, "$amount", 0],
+              },
+            },
+            lastPaymentOn: { $max: "$paidOn" },
+          },
+        },
       ]),
     ]);
     const payableByWorker = new Map(
@@ -118,12 +133,22 @@ router.get(
       ]),
     );
     const paidByWorker = new Map(
-      paidRows.map((row) => [String(row._id), Number(row.totalPaid || 0)]),
+      paidRows.map((row) => [
+        String(row._id),
+        {
+          totalPaid: Number(row.totalPaid || 0),
+          totalReturned: Number(row.totalReturned || 0),
+          lastPaymentOn: row.lastPaymentOn,
+        },
+      ]),
     );
     res.json({
       workers: workers.map((worker) => {
         const totalPayable = payableByWorker.get(String(worker._id)) || 0;
-        const totalPaid = paidByWorker.get(String(worker._id)) || 0;
+        const paymentTotals = paidByWorker.get(String(worker._id)) || {};
+        const totalPaid = paymentTotals.totalPaid || 0;
+        const totalReturned = paymentTotals.totalReturned || 0;
+        const netPaid = totalPaid - totalReturned;
         const workerData = worker.toObject();
         if (workerData.aadhaarFrontPublicId)
           workerData.aadhaarFrontPath = authenticatedImageUrl(
@@ -137,8 +162,11 @@ router.get(
           ...workerData,
           totalPayable,
           totalPaid,
-          totalDue: Math.max(0, totalPayable - totalPaid),
-          overpaid: Math.max(0, totalPaid - totalPayable),
+          totalReturned,
+          netPaid,
+          lastPaymentOn: paymentTotals.lastPaymentOn || null,
+          totalDue: Math.max(0, totalPayable - netPaid),
+          overpaid: Math.max(0, netPaid - totalPayable),
         };
       }),
     });
@@ -449,7 +477,7 @@ router.get(
       throw new ApiError(400, "Start date cannot be after end date.");
     }
     const attendanceFilter = { worker: worker.id };
-    const paymentFilter = { worker: worker.id };
+    const paymentFilter = { worker: worker.id, deletedAt: null };
     if (Object.keys(dateFilter).length) {
       attendanceFilter.date = dateFilter;
       paymentFilter.paidOn = dateFilter;
@@ -499,6 +527,10 @@ router.get(
     const totalPaid = payments
       .filter((payment) => payment.flow === "OUTFLOW" && payment.worker)
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const totalReturned = payments
+      .filter((payment) => payment.flow === "INFLOW" && payment.worker)
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const netPaid = totalPaid - totalReturned;
     const totals = attendanceSummary[0] || {
       totalPayable: 0,
       days: 0,
@@ -512,8 +544,10 @@ router.get(
       attendanceSummary: {
         ...totals,
         totalPaid,
-        totalDue: Math.max(0, Number(totals.totalPayable || 0) - totalPaid),
-        overpaid: Math.max(0, totalPaid - Number(totals.totalPayable || 0)),
+        totalReturned,
+        netPaid,
+        totalDue: Math.max(0, Number(totals.totalPayable || 0) - netPaid),
+        overpaid: Math.max(0, netPaid - Number(totals.totalPayable || 0)),
       },
       attendancePagination: {
         page: attendancePage,

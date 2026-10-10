@@ -7,6 +7,7 @@ import {
 import {
   CalendarDays,
   ChartNoAxesCombined,
+  Building2,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -16,11 +17,12 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import companyLogo from "../assets/image.png";
 import {
   AdminsPage,
   AttendancePage,
+  CompanyClientsPage,
   DashboardPage,
   PaymentsPage,
   ReportsPage,
@@ -40,16 +42,26 @@ const labourNavGroups = [
     label: "Work operations",
     items: [
       ["/labour/workers", "Workforce", UsersRound],
+      ["/labour/companies", "Companies", Building2],
       ["/labour/attendance", "Attendance", CalendarDays],
       ["/labour/payments", "Payments", WalletCards],
     ],
   },
 ];
 
-const labourRoutes = (
+const labourRoutes = (user) => (
   <>
     <Route path="/labour" element={<DashboardPage />} />
     <Route path="/labour/workers" element={<WorkersPage />} />
+    <Route
+      path="/labour/companies"
+      element={
+        <CompanyClientsPage
+          canEdit={["OWNER", "ADMIN"].includes(user.role)}
+          isOwner={user.role === "OWNER"}
+        />
+      }
+    />
     <Route path="/labour/attendance" element={<AttendancePage />} />
     <Route path="/labour/payments" element={<PaymentsPage />} />
     <Route path="/labour/reports" element={<ReportsPage />} />
@@ -62,9 +74,28 @@ const navLinkClass = (label, isActive) =>
 export function AppShell({ session, onLogout }) {
   const user = session?.user;
   const [open, setOpen] = useState(false);
-  if (!user?.name || !user?.role) return null;
   const workspaceTitle = "Labour Management";
-  const close = () => setOpen(false);
+  const close = useCallback(() => setOpen(false), []);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    if (!open || !media.matches) return undefined;
+    const originalOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") close();
+    };
+    const handleViewportChange = () => {
+      if (!media.matches) close();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    media.addEventListener("change", handleViewportChange);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+      media.removeEventListener("change", handleViewportChange);
+    };
+  }, [open, close]);
+  if (!user?.name || !user?.role) return null;
   return (
     <div className={`${styles["app-shell"]}`}>
       <aside
@@ -83,11 +114,12 @@ export function AppShell({ session, onLogout }) {
           <button
             className={`${styles["mobile-close"]} ${styles["icon-button"]}`}
             onClick={close}
+            aria-label="Close navigation menu"
           >
             <X size={19} />
           </button>
         </div>
-        <nav>
+        <nav id="primary-navigation">
           {labourNavGroups.map((group) => (
             <div className={`${styles["nav-group"]}`} key={group.label}>
               <span className={`${styles["nav-group-label"]}`}>
@@ -118,7 +150,7 @@ export function AppShell({ session, onLogout }) {
               to="/admins"
               onClick={close}
               className={({ isActive }) =>
-                isActive ? styles.active : undefined
+                `${styles["admin-nav-link"]} ${isActive ? styles.active : ""}`
               }
             >
               <Settings size={19} />
@@ -155,6 +187,9 @@ export function AppShell({ session, onLogout }) {
           <button
             className={`${styles["mobile-menu"]} ${styles["icon-button"]}`}
             onClick={() => setOpen(true)}
+            aria-label="Open navigation menu"
+            aria-expanded={open}
+            aria-controls="primary-navigation"
           >
             <Menu size={22} />
           </button>
@@ -175,7 +210,7 @@ export function AppShell({ session, onLogout }) {
         <div className={`${styles["page-wrap"]}`}>
           <Routes>
             <Route path="/" element={<Navigate to="/labour" replace />} />
-            {labourRoutes}
+            {labourRoutes(user)}
             <Route
               path="/admins"
               element={

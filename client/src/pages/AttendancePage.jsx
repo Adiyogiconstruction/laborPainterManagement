@@ -49,6 +49,8 @@ function MonthlyAttendance() {
   const [periodWorker, setPeriodWorker] = useState("");
   const [periodTeam, setPeriodTeam] = useState("");
   const [periodCompany, setPeriodCompany] = useState("");
+  const [workerPage, setWorkerPage] = useState(1);
+  const [workerPageSize, setWorkerPageSize] = useState(20);
   const [periodStart, setPeriodStart] = useState(`${defaultMonth()}-01`);
   const [periodEnd, setPeriodEnd] = useState(`${defaultMonth()}-01`);
   const [loading, setLoading] = useState(false);
@@ -69,16 +71,22 @@ function MonthlyAttendance() {
     if (event.target.tagName !== "INPUT") return;
 
     const input = event.target;
-    const { key, selectionStart, value } = input;
+    const { key } = event;
     const row = Number(input.dataset.row);
     const col = Number(input.dataset.col);
+
+    if (key === "Backspace" || key === "Delete") {
+      event.preventDefault();
+      updateCell(input.dataset.worker, col + 1, "");
+      return;
+    }
 
     let nextRow = row;
     let nextCol = col;
 
-    if (key === "ArrowRight" && selectionStart === value.length) {
+    if (key === "ArrowRight") {
       nextCol += 1;
-    } else if (key === "ArrowLeft" && selectionStart === 0) {
+    } else if (key === "ArrowLeft") {
       nextCol -= 1;
     } else if (key === "ArrowDown") {
       nextRow += 1;
@@ -119,7 +127,6 @@ function MonthlyAttendance() {
       setData(result);
       setCells(nextCells);
       setDrafts({});
-      setPeriodWorker((current) => current || result.workers[0]?._id || "");
       setPeriodStart(`${month}-01`);
       setPeriodEnd(`${month}-${String(result.days).padStart(2, "0")}`);
       setSaved(false);
@@ -133,6 +140,10 @@ function MonthlyAttendance() {
   useEffect(() => {
     load();
   }, [month, businessType]);
+
+  useEffect(() => {
+    setWorkerPage(1);
+  }, [month, periodWorker, periodTeam, periodCompany]);
 
   const teams = useMemo(
     () =>
@@ -156,6 +167,16 @@ function MonthlyAttendance() {
     (!periodWorker || worker._id === periodWorker) &&
     (!periodTeam || worker.teamName === periodTeam) &&
     (!periodCompany || worker.companyName === periodCompany);
+  const filteredWorkers = data.workers.filter(workerMatches);
+  const workerPageCount = Math.max(
+    1,
+    Math.ceil(filteredWorkers.length / workerPageSize),
+  );
+  const currentWorkerPage = Math.min(workerPage, workerPageCount);
+  const pagedWorkers = filteredWorkers.slice(
+    (currentWorkerPage - 1) * workerPageSize,
+    currentWorkerPage * workerPageSize,
+  );
 
   const cellFor = (workerId, day) =>
     cells[`${workerId}:${month}-${String(day).padStart(2, "0")}`] || {
@@ -313,9 +334,8 @@ function MonthlyAttendance() {
       const pdfWorkers = selectedWorkers.map((worker, index) => {
         let normalDays = 0;
         let overtimeHours = 0;
-        const attendance = Array.from({ length: 31 }, (_, dayIndex) => {
+        const attendance = Array.from({ length: data.days }, (_, dayIndex) => {
           const day = dayIndex + 1;
-          if (day > data.days) return "";
           const dateKey = `${month}-${String(day).padStart(2, "0")}`;
           if (dateKey < periodStart || dateKey > periodEnd) return "";
           const cell = cellFor(worker._id, day);
@@ -342,17 +362,13 @@ function MonthlyAttendance() {
           totalDaysValue: totalDays,
         };
       });
-      const selectedWorker = selectedWorkers.find(
-        (worker) => worker._id === periodWorker,
-      );
       const { generateAttendancePdf } = await import(
         "../utils/attendancePdf.js"
       );
       await generateAttendancePdf({
         month,
-        team: periodTeam || selectedWorker?.teamName || "ALL TEAMS",
-        companyName:
-          periodCompany || companyProfile?.companyName || "Company Name",
+        team: periodTeam,
+        companyName: periodCompany || "NA",
         workers: pdfWorkers,
         profileLogoUrl: companyProfile?.logoUrl,
         fallbackLogoUrl: companyLogo,
@@ -367,11 +383,11 @@ function MonthlyAttendance() {
   return (
     <>
       <PageHeader
-        eyebrow="ATTENDANCE"
+        className={`${styles["attendance-page-header"]}`}
         title="Monthly attendance"
-        detail="Enter P, A, P+P, P+P+1, L, H or P+1 directly in each day cell."
       />
       <Panel
+        className={`${styles["attendance-month-panel"]}`}
         title="Labour monthly grid"
         detail={`${data.workers.length} active workers · ${data.locked ? "Locked" : "Open"}`}
         action={
@@ -554,11 +570,6 @@ function MonthlyAttendance() {
             </strong>
           </div>
         </div>
-        <p className={`${styles["form-hint"]}`}>
-          Codes: P = present, A = absent, P+P = double present, P+P+1 = double
-          present with one OT hour, L = leave, H = half day, P+1 = present with
-          one OT hour.
-        </p>
         <ErrorNote error={error} />
         {saved && <Status tone="teal">Month saved</Status>}
         {loading ? (
@@ -568,6 +579,50 @@ function MonthlyAttendance() {
             ref={containerRef}
             className={`${styles["table-wrap"]} ${styles["monthly-grid-wrap"]}`}
           >
+            {filteredWorkers.length > 0 && (
+              <div className={`${styles["workforce-pagination"]} ${styles["attendance-pagination"]}`}>
+                <label>
+                  Rows
+                  <select
+                    value={workerPageSize}
+                    onChange={(event) => {
+                      setWorkerPageSize(Number(event.target.value));
+                      setWorkerPage(1);
+                    }}
+                    aria-label="Attendance workers per page"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  per page
+                </label>
+                <span>
+                  {(currentWorkerPage - 1) * workerPageSize + 1}–
+                  {Math.min(currentWorkerPage * workerPageSize, filteredWorkers.length)} of{" "}
+                  {filteredWorkers.length} workers
+                </span>
+                <div>
+                  <button
+                    type="button"
+                    className={`${styles["button-secondary"]}`}
+                    disabled={currentWorkerPage <= 1}
+                    onClick={() => setWorkerPage(currentWorkerPage - 1)}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles["button-secondary"]}`}
+                    disabled={currentWorkerPage >= workerPageCount}
+                    onClick={() => setWorkerPage(currentWorkerPage + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
             <table className={`${styles["monthly-grid"]}`}>
               <thead>
                 <tr>
@@ -578,7 +633,7 @@ function MonthlyAttendance() {
                 </tr>
               </thead>
               <tbody>
-                {data.workers.filter(workerMatches).map((worker) => (
+                {pagedWorkers.map((worker, workerIndex) => (
                   <tr key={worker._id}>
                     <td>
                       <strong>{worker.name}</strong>
@@ -601,8 +656,9 @@ function MonthlyAttendance() {
                                 `${worker._id}:${month}-${String(day).padStart(2, "0")}`
                               ] ?? codeFor(cell)
                             }
-                            data-row={index}
+                            data-row={workerIndex}
                             data-col={day - 1}
+                            data-worker={worker._id}
                             className={`${styles["monthly-cell"]} ${styles[`monthly-${status.toLowerCase()}`]}`}
                             onChange={(event) =>
                               updateCell(worker._id, day, event.target.value)
@@ -620,7 +676,11 @@ function MonthlyAttendance() {
                 ))}
               </tbody>
             </table>
-            {!data.workers.length && <Empty title="No active workers" />}
+            {!filteredWorkers.length && (
+              <Empty
+                title={data.workers.length ? "No workers match these filters" : "No active workers"}
+              />
+            )}
           </div>
         )}
       </Panel>

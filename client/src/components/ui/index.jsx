@@ -2,9 +2,9 @@ import styles from "../../styles/design.module.css";
 import { AlertTriangle, X, LoaderCircle, Plus, Search } from "lucide-react";
 import { useState } from "react";
 
-export function PageHeader({ eyebrow, title, detail, action }) {
+export function PageHeader({ eyebrow, title, detail, action, className = "" }) {
   return (
-    <div className={`${styles["page-header"]}`}>
+    <div className={`${styles["page-header"]} ${className}`}>
       <div>
         <p className={`${styles["eyebrow"]}`}>{eyebrow}</p>
         <h1>{title}</h1>
@@ -70,7 +70,7 @@ export function DeleteConfirm({ itemLabel, onClose, onConfirm }) {
   const [error, setError] = useState("");
   const confirm = async (event) => {
     event.preventDefault();
-    if (confirmation !== "DELETE") return;
+    if (confirmation.trim().toUpperCase() !== "DELETE") return;
     setDeleting(true);
     setError("");
     try {
@@ -98,6 +98,7 @@ export function DeleteConfirm({ itemLabel, onClose, onConfirm }) {
             autoFocus
             value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)}
+            className={styles["delete-confirm-code"]}
             placeholder="DELETE"
             autoComplete="off"
           />
@@ -116,7 +117,7 @@ export function DeleteConfirm({ itemLabel, onClose, onConfirm }) {
             type="submit"
             className={`${styles["button-danger"]}`}
             loading={deleting}
-            disabled={confirmation !== "DELETE"}
+            disabled={confirmation.trim().toUpperCase() !== "DELETE"}
           >
             Delete permanently
           </Button>

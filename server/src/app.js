@@ -10,6 +10,7 @@ import dashboardRoutes from "./routes/dashboard.js";
 import reportRoutes from "./routes/reports.js";
 import companyProfileRoutes from "./routes/companyProfile.js";
 import expenseCategoryRoutes from "./routes/expenseCategories.js";
+import companyClientRoutes from "./routes/companyClients.js";
 import { requireAuth } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
@@ -66,6 +67,7 @@ app.use("/api/workers", requireAuth, workerRoutes);
 app.use("/api/attendance", requireAuth, attendanceRoutes);
 app.use("/api/payments", requireAuth, paymentRoutes);
 app.use("/api/company-profile", requireAuth, companyProfileRoutes);
+app.use("/api/companies", requireAuth, companyClientRoutes);
 app.use("/api/expense-categories", requireAuth, expenseCategoryRoutes);
 app.use("/api/reports", requireAuth, reportRoutes);
 app.use(notFound);

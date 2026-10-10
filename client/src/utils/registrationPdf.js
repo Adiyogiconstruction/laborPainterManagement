@@ -282,10 +282,21 @@ const drawMultilineValueCell = (doc, x, y, width, height, value) => {
   doc.text(lines, x + 1.5, firstBaseline, { lineHeightFactor: 1.2 });
 };
 
-const imageBox = (doc, image, x, y, width, height, placeholder) => {
-  setStroke(doc);
-  doc.setFillColor(255, 255, 255);
-  doc.rect(x, y, width, height, "FD");
+const imageBox = (
+  doc,
+  image,
+  x,
+  y,
+  width,
+  height,
+  placeholder,
+  drawBorder = true,
+) => {
+  if (drawBorder) {
+    setStroke(doc);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, width, height, "FD");
+  }
   if (!image?.data || !image.width || !image.height) {
     drawText(doc, placeholder, x + width / 2, y + height / 2 + 1, width - 4, {
       fontSize: 6.3,
@@ -811,9 +822,9 @@ export function createRegistrationPdf({
   const headerTop = header.y;
   const headerHeight = header.height;
   const logoWidth = header.width * 0.28;
+  const dividerX = header.x + logoWidth;
   setStroke(doc);
   doc.rect(header.x, headerTop, header.width, headerHeight);
-  const dividerX = header.x + logoWidth;
   doc.line(dividerX, headerTop, dividerX, headerTop + headerHeight);
   imageBox(
     doc,
@@ -823,6 +834,7 @@ export function createRegistrationPdf({
     logoWidth - 4,
     headerHeight - 4,
     "Logo unavailable",
+    false,
   );
   const headerX = dividerX + 2;
   const headerWidth = header.x + header.width - headerX - 2;

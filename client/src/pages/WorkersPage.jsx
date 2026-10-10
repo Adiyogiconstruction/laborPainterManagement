@@ -9,8 +9,8 @@ import {
   CalendarDays,
   CircleDollarSign,
   Download,
+  Eye,
   FilePlus2,
-  History,
   IndianRupee,
   Landmark,
   Pencil,
@@ -18,12 +18,17 @@ import {
   Printer,
   ReceiptText,
   RefreshCcw,
+  ShieldAlert,
+  ShieldCheck,
   Trash2,
+  UserRoundCheck,
+  UserRoundX,
   UserRoundPlus,
   UsersRound,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
 import companyLogo from "../assets/image.png";
+import { BulkWorkerUploadModal } from "../components/BulkWorkerUploadModal.jsx";
 import "@fontsource/noto-sans-devanagari/400.css";
 import { date, inputDate, money, number } from "../utils/formatters.js";
 import {
@@ -89,7 +94,6 @@ const exportValue = (worker, key) => {
   return worker[key] ?? "";
 };
 
-const csvCell = (value) => `"${String(value).replaceAll('"', '""')}"`;
 const htmlValue = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -153,7 +157,7 @@ function printWorkerProfile(worker, data, period) {
       ? `${period.from || "Beginning"} to ${period.to || "Today"}`
       : "All time";
   printWindow.document.write(
-    `<!doctype html><html><head><title>${htmlValue(worker.name)} worker report</title><style>body{font-family:Arial,sans-serif;color:#192827;padding:24px}h1{margin:0 0 4px;font-size:22px}h2{margin:24px 0 8px;font-size:14px;border-bottom:1px solid #dce8e5;padding-bottom:6px}p{color:#71817e;font-size:11px;margin:4px 0}table{border-collapse:collapse;width:100%;font-size:10px;margin-top:8px}th,td{border:1px solid #dce8e5;padding:6px;text-align:left;vertical-align:top}th{background:#e3f4f0;text-transform:uppercase;font-size:9px}.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px}.metric{border:1px solid #dce8e5;padding:9px}.metric strong{display:block;font-size:15px}.metric span{font-size:9px;color:#71817e}</style></head><body><h1>${htmlValue(worker.name)}</h1><p>${htmlValue(typeTitle(worker.type))} · ${htmlValue(worker.skill || "Worker")} · Report period: ${htmlValue(periodText)}</p><p>Phone: ${htmlValue(worker.phone)} · Team: ${htmlValue(worker.teamName || "—")} · Work zone: ${htmlValue(worker.workZone || "—")}</p><div class="summary"><div class="metric"><strong>${summary.days || 0}</strong><span>Attendance days</span></div><div class="metric"><strong>${summary.presentDays || 0}</strong><span>Present days</span></div><div class="metric"><strong>${summary.doubleDays || 0}</strong><span>Double-work days</span></div><div class="metric"><strong>${htmlValue(money(summary.totalPayable || 0))}</strong><span>Total payable</span></div><div class="metric"><strong>${htmlValue(money(summary.totalPaid || 0))}</strong><span>Paid</span></div></div><h2>Attendance</h2><table><thead><tr><th>Date</th><th>Site / work</th><th>Status</th><th>Units</th><th>Payable</th></tr></thead><tbody>${rows(data.attendance || [], [(item) => date(item.date), (item) => item.assignment?.siteName || "—", (item) => item.status, (item) => item.workUnits || 0, (item) => money(item.payableAmount || 0)])}</tbody></table><h2>Work assignments</h2><table><thead><tr><th>Site / client</th><th>Work</th><th>Start</th><th>Days</th><th>Status</th></tr></thead><tbody>${rows(data.assignments || [], [(item) => item.siteName, (item) => item.workDescription, (item) => date(item.startDate), (item) => item.workDays || 0, (item) => item.status])}</tbody></table><h2>Payment history</h2><table><thead><tr><th>Date</th><th>Type</th><th>Work record</th><th>Amount</th></tr></thead><tbody>${rows(data.payments || [], [(item) => date(item.paidOn), (item) => item.kind, (item) => item.assignment?.siteName || "—", (item) => money(item.amount)])}</tbody></table><script>window.onload=()=>window.print();</script></body></html>`,
+    `<!doctype html><html><head><title>${htmlValue(worker.name)} worker report</title><style>body{font-family:Arial,sans-serif;color:#192827;padding:24px}h1{margin:0 0 4px;font-size:22px}h2{margin:24px 0 8px;font-size:14px;border-bottom:1px solid #dce8e5;padding-bottom:6px}p{color:#71817e;font-size:11px;margin:4px 0}table{border-collapse:collapse;width:100%;font-size:10px;margin-top:8px}th,td{border:1px solid #dce8e5;padding:6px;text-align:left;vertical-align:top}th{background:#e3f4f0;text-transform:uppercase;font-size:9px}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:14px}.metric{border:1px solid #dce8e5;padding:9px}.metric strong{display:block;font-size:15px}.metric span{font-size:9px;color:#71817e}</style></head><body><h1>${htmlValue(worker.name)}</h1><p>${htmlValue(typeTitle(worker.type))} · ${htmlValue(worker.skill || "Worker")} · Report period: ${htmlValue(periodText)}</p><p>Phone: ${htmlValue(worker.phone)} · Team: ${htmlValue(worker.teamName || "—")} · Work zone: ${htmlValue(worker.workZone || "—")}</p><div class="summary"><div class="metric"><strong>${summary.days || 0}</strong><span>Attendance days</span></div><div class="metric"><strong>${summary.presentDays || 0}</strong><span>Present days</span></div><div class="metric"><strong>${summary.doubleDays || 0}</strong><span>Double-work days</span></div><div class="metric"><strong>${htmlValue(money(summary.totalPayable || 0))}</strong><span>Total payable</span></div><div class="metric"><strong>${htmlValue(money(summary.netPaid ?? summary.totalPaid ?? 0))}</strong><span>Net paid</span></div><div class="metric"><strong>${htmlValue(money(summary.totalReturned || 0))}</strong><span>Received back</span></div><div class="metric"><strong>${htmlValue(money(summary.totalDue || 0))}</strong><span>Due</span></div><div class="metric"><strong>${htmlValue(money(summary.overpaid || 0))}</strong><span>Extra paid</span></div></div><h2>Attendance</h2><table><thead><tr><th>Date</th><th>Site / work</th><th>Status</th><th>Units</th><th>Payable</th></tr></thead><tbody>${rows(data.attendance || [], [(item) => date(item.date), (item) => item.assignment?.siteName || "—", (item) => item.status, (item) => item.workUnits || 0, (item) => money(item.payableAmount || 0)])}</tbody></table><h2>Work assignments</h2><table><thead><tr><th>Site / client</th><th>Work</th><th>Start</th><th>Days</th><th>Status</th></tr></thead><tbody>${rows(data.assignments || [], [(item) => item.siteName, (item) => item.workDescription, (item) => date(item.startDate), (item) => item.workDays || 0, (item) => item.status])}</tbody></table><h2>Payment history</h2><table><thead><tr><th>Date</th><th>Entry</th><th>Work record</th><th>Diya</th><th>Liya</th></tr></thead><tbody>${rows(data.payments || [], [(item) => date(item.paidOn), (item) => item.flow === "INFLOW" ? `Liya · ${item.kind}` : item.kind, (item) => item.assignment?.siteName || "—", (item) => item.flow === "INFLOW" ? "—" : money(item.amount), (item) => item.flow === "INFLOW" ? money(item.amount) : "—"])}</tbody></table><script>window.onload=()=>window.print();</script></body></html>`,
   );
   printWindow.document.close();
   printWindow.onload = () => {
@@ -313,6 +317,8 @@ function printWorkerOnboardingCompact(worker, profile) {
 }
 
 function WorkerForm({ initial, onClose, onSaved }) {
+  const [companies, setCompanies] = useState([]);
+  const [companyLoadError, setCompanyLoadError] = useState("");
   const [form, setForm] = useState(
     initial || {
       type: "LABOUR",
@@ -337,6 +343,11 @@ function WorkerForm({ initial, onClose, onSaved }) {
   const [photoFile, setPhotoFile] = useState(null);
   const [aadhaarFrontFile, setAadhaarFrontFile] = useState(null);
   const [aadhaarBackFile, setAadhaarBackFile] = useState(null);
+  useEffect(() => {
+    request(api.get("/companies"))
+      .then((result) => setCompanies(result.companies))
+      .catch((err) => setCompanyLoadError(errorMessage(err)));
+  }, []);
   const update = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
   const save = async (event) => {
@@ -407,12 +418,31 @@ function WorkerForm({ initial, onClose, onSaved }) {
             placeholder="Worker name"
           />
         </Field>
-        <Field label="Company name" hint="Optional">
-          <input
+        <Field label="Company / client" hint="Optional">
+          <select
             value={form.companyName || ""}
             onChange={update("companyName")}
-            placeholder="Company name"
-          />
+          >
+            <option value="">No company selected</option>
+            {form.companyName &&
+              !companies.some((company) => company.name === form.companyName) && (
+                <option value={form.companyName}>
+                  {form.companyName} (existing)
+                </option>
+              )}
+            {companies.map((company) => (
+              <option key={company._id} value={company.name}>
+                {company.name}{company.location ? ` · ${company.location}` : ""}
+              </option>
+            ))}
+          </select>
+          {companyLoadError ? (
+            <small className={styles["form-error"]}>{companyLoadError}</small>
+          ) : (
+            !companies.length && (
+              <small>Add a company/client from the Companies page first.</small>
+            )
+          )}
         </Field>
         <Field label="Labour team" hint="Optional">
           <input
@@ -855,9 +885,19 @@ function WorkerHistory({ worker, onClose }) {
                   tone="amber"
                 />
                 <Metric
-                  label="Paid"
+                  label="Given"
                   value={money(data.attendanceSummary?.totalPaid || 0)}
                   tone="blue"
+                />
+                <Metric
+                  label="Received back"
+                  value={money(data.attendanceSummary?.totalReturned || 0)}
+                  tone="teal"
+                />
+                <Metric
+                  label="Net paid"
+                  value={money(data.attendanceSummary?.netPaid || 0)}
+                  tone="purple"
                 />
                 <Metric
                   label="Due"
@@ -955,7 +995,8 @@ function WorkerHistory({ worker, onClose }) {
                     <tr>
                       <th>Date</th>
                       <th>Type</th>
-                      <th>Amount</th>
+                      <th>Diya</th>
+                      <th>Liya</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -964,13 +1005,30 @@ function WorkerHistory({ worker, onClose }) {
                         <td>{date(item.paidOn)}</td>
                         <td>
                           <Status
-                            tone={item.kind === "ADVANCE" ? "amber" : "teal"}
+                            tone={
+                              item.flow === "INFLOW"
+                                ? "green"
+                                : item.kind === "ADVANCE"
+                                  ? "amber"
+                                  : "teal"
+                            }
                           >
-                            {item.kind.replace("_", " ")}
+                            {item.flow === "INFLOW"
+                              ? `Liya · ${item.kind.replace("_", " ")}`
+                              : item.kind.replace("_", " ")}
                           </Status>
                         </td>
-                        <td className={`${styles["amount"]}`}>
-                          {money(item.amount)}
+                        <td
+                          className={
+                            item.flow === "INFLOW"
+                              ? styles["income"]
+                              : styles["amount"]
+                          }
+                        >
+                          {item.flow === "INFLOW" ? "—" : money(item.amount)}
+                        </td>
+                        <td className={`${styles["income"]}`}>
+                          {item.flow === "INFLOW" ? money(item.amount) : "—"}
                         </td>
                       </tr>
                     ))}
@@ -991,6 +1049,12 @@ export function WorkersPage() {
   const [workers, setWorkers] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [ppeFilter, setPpeFilter] = useState("");
+  const [workerPage, setWorkerPage] = useState(1);
+  const [workersPerPage, setWorkersPerPage] = useState(10);
   const [form, setForm] = useState(false);
   const [editing, setEditing] = useState();
   const [deleting, setDeleting] = useState();
@@ -1000,16 +1064,11 @@ export function WorkersPage() {
   const [history, setHistory] = useState();
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const load = () =>
     request(
       api.get("/workers", {
-        params: {
-          type,
-          search,
-          ...(statusFilter !== ""
-            ? { active: String(statusFilter === "active") }
-            : {}),
-        },
+        params: { type },
       }),
     )
       .then(({ workers: result }) => setWorkers(result))
@@ -1019,9 +1078,86 @@ export function WorkersPage() {
       .then(({ workers: result }) => setDeletedWorkers(result || []))
       .catch((err) => setError(errorMessage(err)));
   useEffect(() => {
-    const timer = setTimeout(load, search || statusFilter ? 250 : 0);
+    const timer = setTimeout(load, 0);
     return () => clearTimeout(timer);
-  }, [type, search, statusFilter]);
+  }, [type]);
+  const optionsFor = (field) =>
+    [...new Set(workers.map((worker) => worker[field]?.trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right));
+  const companyOptions = useMemo(() => optionsFor("companyName"), [workers]);
+  const teamOptions = useMemo(() => optionsFor("teamName"), [workers]);
+  const zoneOptions = useMemo(() => optionsFor("workZone"), [workers]);
+  const filteredWorkers = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return workers.filter((worker) => {
+      if (statusFilter && Boolean(worker.active) !== (statusFilter === "active")) {
+        return false;
+      }
+      if (companyFilter && worker.companyName !== companyFilter) return false;
+      if (teamFilter && worker.teamName !== teamFilter) return false;
+      if (zoneFilter && worker.workZone !== zoneFilter) return false;
+      if (ppeFilter && Boolean(worker.ppeKitIssuedOn) !== (ppeFilter === "issued")) {
+        return false;
+      }
+      if (!query) return true;
+      return [
+        worker.name,
+        worker.phone,
+        worker.companyName,
+        worker.teamName,
+        worker.workZone,
+        worker.skill,
+      ].some((value) => String(value || "").toLocaleLowerCase().includes(query));
+    });
+  }, [
+    workers,
+    search,
+    statusFilter,
+    companyFilter,
+    teamFilter,
+    zoneFilter,
+    ppeFilter,
+  ]);
+  useEffect(() => {
+    setWorkerPage(1);
+  }, [search, statusFilter, companyFilter, teamFilter, zoneFilter, ppeFilter]);
+  const workerPageCount = Math.max(
+    1,
+    Math.ceil(filteredWorkers.length / workersPerPage),
+  );
+  const currentWorkerPage = Math.min(workerPage, workerPageCount);
+  const pagedWorkers = filteredWorkers.slice(
+    (currentWorkerPage - 1) * workersPerPage,
+    currentWorkerPage * workersPerPage,
+  );
+  const activeFilterCount = [
+    statusFilter,
+    companyFilter,
+    teamFilter,
+    zoneFilter,
+    ppeFilter,
+    search.trim(),
+  ].filter(Boolean).length;
+  const workforceMetrics = useMemo(() => {
+    const activeCount = filteredWorkers.filter((worker) => worker.active).length;
+    const ppeCount = filteredWorkers.filter(
+      (worker) => worker.ppeKitIssuedOn,
+    ).length;
+    const rateTotal = filteredWorkers.reduce(
+      (total, worker) => total + (Number(worker.defaultDailyRate) || 0),
+      0,
+    );
+    return {
+      total: filteredWorkers.length,
+      active: activeCount,
+      inactive: filteredWorkers.length - activeCount,
+      ppe: ppeCount,
+      noPpe: filteredWorkers.length - ppeCount,
+      averageRate: filteredWorkers.length
+        ? Math.round(rateTotal / filteredWorkers.length)
+        : 0,
+    };
+  }, [filteredWorkers]);
   const save = (worker) => {
     setForm(false);
     setEditing(null);
@@ -1037,6 +1173,8 @@ export function WorkersPage() {
                   ...worker,
                   totalPayable: worker.totalPayable ?? item.totalPayable,
                   totalPaid: worker.totalPaid ?? item.totalPaid,
+                  totalReturned: worker.totalReturned ?? item.totalReturned,
+                  netPaid: worker.netPaid ?? item.netPaid,
                   totalDue: worker.totalDue ?? item.totalDue,
                   overpaid: worker.overpaid ?? item.overpaid,
                 }
@@ -1045,32 +1183,27 @@ export function WorkersPage() {
         : [worker, ...current],
     );
   };
-  const getExportWorkers = async () => {
-    const result = await request(api.get("/workers", { params: { type } }));
-    return result.workers || [];
-  };
   const exportExcel = async () => {
     setExporting(true);
     setError("");
     try {
-      const records = await getExportWorkers();
-      const csv = [
-        exportColumns.map(([label]) => csvCell(label)).join(","),
-        ...records.map((worker) =>
-          exportColumns
-            .map(([, key]) => csvCell(exportValue(worker, key)))
-            .join(","),
-        ),
-      ].join("\r\n");
-      const blob = new Blob([`\uFEFF${csv}`], {
-        type: "text/csv;charset=utf-8;",
+      const { buildWorkforceWorkbook } = await import(
+        "../utils/workforceExcel.js"
+      );
+      const workbook = buildWorkforceWorkbook(
+        filteredWorkers,
+        exportColumns,
+        exportValue,
+      );
+      const blob = new Blob([workbook], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${type.toLowerCase()}-workforce.csv`;
+      link.download = `${type.toLowerCase()}-workforce.xlsx`;
       link.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -1081,59 +1214,64 @@ export function WorkersPage() {
     setExporting(true);
     setError("");
     try {
-      const [workersExport, companyData] = await Promise.all([
-        getExportWorkers(),
-        request(api.get("/company-profile")).catch(() => null),
-      ]);
-      printWorkers(workersExport, type, companyData?.profile || null);
+      const companyData = await request(api.get("/company-profile")).catch(
+        () => null,
+      );
+      printWorkers(filteredWorkers, type, companyData?.profile || null);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setExporting(false);
     }
   };
+  const workforceActions = (
+    <div className={styles["workforce-export-actions"]}>
+      <Button
+        icon={Download}
+        className={styles["button-excel"]}
+        onClick={exportExcel}
+        loading={exporting}
+      >
+        Excel
+      </Button>
+      <Button
+        icon={Printer}
+        className={styles["button-pdf"]}
+        onClick={exportPdf}
+        disabled={exporting}
+      >
+        PDF
+      </Button>
+      <Button
+        className={styles["button-secondary"]}
+        onClick={() => {
+          setShowRecycleBin((current) => !current);
+          if (!showRecycleBin) loadDeletedWorkers();
+        }}
+        icon={Trash2}
+      >
+        Recycle bin
+      </Button>
+      <AddButton
+        className={styles["button-primary"]}
+        onClick={() => setForm(true)}
+      >
+        Add {typeTitle(type)}
+      </AddButton>
+      <Button
+        icon={FilePlus2}
+        className={styles["button-secondary"]}
+        onClick={() => setBulkUploadOpen(true)}
+      >
+        Bulk upload labour
+      </Button>
+    </div>
+  );
   return (
     <>
       <PageHeader
-        eyebrow="LABOUR TEAM"
+        className={styles["workforce-page-header"]}
         title="Labour workforce management"
-        detail="Maintain complete labour profiles, daily rates and work history."
-        action={
-          <div className={`${styles["actions-inline"]}`}>
-            <Button
-              icon={Download}
-              className={`${styles["button-secondary"]}`}
-              onClick={exportExcel}
-              loading={exporting}
-            >
-              Excel
-            </Button>
-            <Button
-              icon={Printer}
-              className={`${styles["button-secondary"]}`}
-              onClick={exportPdf}
-              disabled={exporting}
-            >
-              PDF
-            </Button>
-            <Button
-              className={`${styles["button-secondary"]}`}
-              onClick={() => {
-                setShowRecycleBin((current) => !current);
-                if (!showRecycleBin) loadDeletedWorkers();
-              }}
-              icon={Trash2}
-            >
-              Recycle bin
-            </Button>
-            <AddButton
-              className={`${styles["button-primary"]}`}
-              onClick={() => setForm(true)}
-            >
-              Add {typeTitle(type)}
-            </AddButton>
-          </div>
-        }
       />
       {showRecycleBin && (
         <Panel
@@ -1199,24 +1337,148 @@ export function WorkersPage() {
         </Panel>
       )}
       <Panel
-        action={
-          <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
-            <SearchBox
-              value={search}
-              onChange={setSearch}
-              placeholder="Search labour by name, company, team or work zone…"
-            />
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              aria-label="Worker status filter"
+        title="Labour filters"
+        detail="Filter by status, company, team, work zone or PPE."
+        action={workforceActions}
+        className={styles["workforce-controls-panel"]}
+      >
+        <div className={styles["workforce-filter-grid"]}>
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Search name, phone, skill…"
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label="Worker status filter"
+          >
+            <option value="">All status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <select
+            value={companyFilter}
+            onChange={(event) => setCompanyFilter(event.target.value)}
+            aria-label="Company filter"
+          >
+            <option value="">All companies</option>
+            {companyOptions.map((company) => (
+              <option key={company} value={company}>
+                {company}
+              </option>
+            ))}
+          </select>
+          <select
+            value={teamFilter}
+            onChange={(event) => setTeamFilter(event.target.value)}
+            aria-label="Team filter"
+          >
+            <option value="">All teams</option>
+            {teamOptions.map((team) => (
+              <option key={team} value={team}>
+                {team}
+              </option>
+            ))}
+          </select>
+          <select
+            value={zoneFilter}
+            onChange={(event) => setZoneFilter(event.target.value)}
+            aria-label="Work zone filter"
+          >
+            <option value="">All work zones</option>
+            {zoneOptions.map((zone) => (
+              <option key={zone} value={zone}>
+                {zone}
+              </option>
+            ))}
+          </select>
+          <select
+            value={ppeFilter}
+            onChange={(event) => setPpeFilter(event.target.value)}
+            aria-label="PPE filter"
+          >
+            <option value="">All PPE records</option>
+            <option value="issued">PPE issued</option>
+            <option value="missing">PPE not issued</option>
+          </select>
+          {activeFilterCount > 0 && (
+            <Button
+              type="button"
+              className={styles["button-ghost"]}
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("");
+                setCompanyFilter("");
+                setTeamFilter("");
+                setZoneFilter("");
+                setPpeFilter("");
+              }}
             >
-              <option value="">All status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+              Clear filters
+            </Button>
+          )}
+        </div>
+        <div className={styles["workforce-summary"]}>
+          <div className={styles["workforce-summary-heading"]}>
+            <strong>Workforce overview</strong>
+            <span>
+              {filteredWorkers.length} of {workers.length} labour records
+            </span>
           </div>
-        }
+          <div
+            className={`${styles["metric-grid"]} ${styles["workforce-metrics"]}`}
+            aria-label="Filtered workforce summary"
+          >
+            <Metric
+              label="Total labour"
+              value={number(workforceMetrics.total)}
+              detail="Matching filters"
+              icon={UsersRound}
+              tone="blue"
+            />
+            <Metric
+              label="Active labour"
+              value={number(workforceMetrics.active)}
+              detail="Currently active"
+              icon={UserRoundCheck}
+              tone="green"
+            />
+            <Metric
+              label="Inactive labour"
+              value={number(workforceMetrics.inactive)}
+              detail="Currently inactive"
+              icon={UserRoundX}
+              tone="coral"
+            />
+            <Metric
+              label="Labour with PPE"
+              value={number(workforceMetrics.ppe)}
+              detail="PPE issue recorded"
+              icon={ShieldCheck}
+              tone="teal"
+            />
+            <Metric
+              label="Labour without PPE"
+              value={number(workforceMetrics.noPpe)}
+              detail="No PPE issue date"
+              icon={ShieldAlert}
+              tone="amber"
+            />
+            <Metric
+              label="Avg. daily rate"
+              value={money(workforceMetrics.averageRate)}
+              detail="Across filtered labour"
+              icon={IndianRupee}
+              tone="purple"
+            />
+          </div>
+        </div>
+      </Panel>
+      <Panel
+        title={`Labour list (${filteredWorkers.length})`}
+        detail="Manage labour profiles, rates, work history and payment status."
+        className={styles["workforce-list-panel"]}
       >
         <ErrorNote error={error} />
         <div className={`${styles["table-wrap"]}`}>
@@ -1239,7 +1501,7 @@ export function WorkersPage() {
               </tr>
             </thead>
             <tbody>
-              {workers.map((worker) => (
+              {pagedWorkers.map((worker) => (
                 <tr
                   key={worker._id}
                   className={
@@ -1269,7 +1531,15 @@ export function WorkersPage() {
                   </td>
                   <td>{worker.phone || "—"}</td>
                   <td>{worker.skill || "—"}</td>
-                  <td>{worker.workZone || "—"}</td>
+                  <td>
+                    {worker.workZone ? (
+                      <span className={styles["zone-tag"]}>
+                        {worker.workZone}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td>
                     {worker.ppeKitIssuedOn ? date(worker.ppeKitIssuedOn) : "—"}
                   </td>
@@ -1280,16 +1550,24 @@ export function WorkersPage() {
                     {money(worker.overtimeHourlyRate || 0)}/hr
                   </td>
                   <td>
-                    <Status tone={worker.active ? "teal" : "neutral"}>
+                    <Status tone={worker.active ? "green" : "coral"}>
                       {worker.active ? "Active" : "Inactive"}
                     </Status>
                   </td>
                   <td>
-                    <strong>{money(worker.totalDue || 0)}</strong>
+                    <strong
+                      className={
+                        worker.totalDue > 0
+                          ? styles["payment-due"]
+                          : styles["payment-settled"]
+                      }
+                    >
+                      {money(worker.totalDue || 0)}
+                    </strong>
                     <small>
                       Total payable {money(worker.totalPayable || 0)}
                     </small>
-                    <small>Paid {money(worker.totalPaid || 0)}</small>
+                    <small>Net paid {money(worker.netPaid ?? worker.totalPaid ?? 0)}</small>
                     {(worker.overpaid || 0) > 0 && (
                       <small className={`${styles["payment-extra"]}`}>
                         +{money(worker.overpaid)} extra paid
@@ -1302,7 +1580,7 @@ export function WorkersPage() {
                       title="View history"
                       onClick={() => setHistory(worker)}
                     >
-                      <History size={17} />
+                      <Eye size={17} />
                     </button>
                     <button
                       className={`${styles["icon-button"]}`}
@@ -1321,18 +1599,67 @@ export function WorkersPage() {
                   </td>
                 </tr>
               ))}
-              {!workers.length && (
+              {!filteredWorkers.length && (
                 <tr>
-                  <td colSpan="12">
+                  <td colSpan="13">
                     <Empty
-                      title={`No ${type.toLowerCase()} records`}
-                      detail={`Add your first ${type.toLowerCase()} to get started.`}
+                      title={
+                        workers.length
+                          ? "No labour matches these filters"
+                          : "No labour records"
+                      }
+                      detail={
+                        workers.length
+                          ? "Try changing or clearing the selected filters."
+                          : "Add your first labour record to get started."
+                      }
                     />
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+        <div className={styles["workforce-pagination"]}>
+          <label>
+            Show
+            <select
+              aria-label="Labour rows per page"
+              value={workersPerPage}
+              onChange={(event) => {
+                setWorkersPerPage(Number(event.target.value));
+                setWorkerPage(1);
+              }}
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+            entries
+          </label>
+          <span>
+            {filteredWorkers.length
+              ? `${(currentWorkerPage - 1) * workersPerPage + 1}–${Math.min(currentWorkerPage * workersPerPage, filteredWorkers.length)} of ${filteredWorkers.length}`
+              : "0 entries"}
+          </span>
+          <div>
+            <Button
+              type="button"
+              className={styles["button-ghost"]}
+              disabled={currentWorkerPage <= 1}
+              onClick={() => setWorkerPage(currentWorkerPage - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              className={styles["button-ghost"]}
+              disabled={currentWorkerPage >= workerPageCount}
+              onClick={() => setWorkerPage(currentWorkerPage + 1)}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       </Panel>
       {form && (
@@ -1362,6 +1689,14 @@ export function WorkersPage() {
               ...current,
             ]);
             setDeleting(null);
+          }}
+        />
+      )}
+      {bulkUploadOpen && (
+        <BulkWorkerUploadModal
+          onClose={() => setBulkUploadOpen(false)}
+          onCompleted={async () => {
+            await load();
           }}
         />
       )}

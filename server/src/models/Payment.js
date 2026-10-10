@@ -2,7 +2,12 @@ import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema(
   {
-    flow: { type: String, enum: ["OUTFLOW"], default: "OUTFLOW", index: true },
+    flow: {
+      type: String,
+      enum: ["OUTFLOW", "INFLOW"],
+      default: "OUTFLOW",
+      index: true,
+    },
     kind: {
       type: String,
       enum: [
@@ -11,6 +16,7 @@ const paymentSchema = new mongoose.Schema(
         "TRAVEL_ADVANCE",
         "EXPENSE",
         "ADJUSTMENT",
+        "REFUND",
         "OTHER",
       ],
       required: true,
@@ -48,6 +54,12 @@ const paymentSchema = new mongoose.Schema(
 paymentSchema.pre("validate", function validateCounterparty(next) {
   if (this.kind !== "EXPENSE" && !this.worker) {
     return next(new Error("Worker is required for this payment."));
+  }
+  if (
+    this.flow === "INFLOW" &&
+    (!this.worker || !["REFUND", "ADJUSTMENT"].includes(this.kind))
+  ) {
+    return next(new Error("Incoming labour payments must be a refund or adjustment."));
   }
   if (this.kind === "OTHER" && !String(this.notes || "").trim()) {
     return next(new Error("Please specify the other payment type in notes."));
