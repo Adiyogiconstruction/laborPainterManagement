@@ -3,7 +3,7 @@ import { useState } from "react";
 import api, { request } from "../services/apiClient.js";
 import { Button, Field, Modal } from "./ui/index.jsx";
 import { ErrorNote, errorMessage } from "../pages/shared.jsx";
-import { parseCsv } from "../utils/paymentLedger.js";
+import { parseWorkerUploadFile } from "../utils/workerUploadFile.js";
 
 const downloadTemplate = () => {
   const template = [
@@ -20,6 +20,56 @@ const downloadTemplate = () => {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
+const downloadExcelTemplate = async () => {
+  const { buildWorkforceWorkbook } = await import("../utils/workforceExcel.js");
+  const columns = [
+    "name",
+    "phone",
+    "aadhaarNumber",
+    "address",
+    "skill",
+    "defaultDailyRate",
+    "joiningDate",
+    "companyName",
+    "teamName",
+    "workZone",
+    "overtimeHourlyRate",
+    "active",
+    "notes",
+  ].map((key) => [key, key]);
+  const workbook = buildWorkforceWorkbook(
+    [
+      {
+        name: "Ramesh Yadav",
+        phone: "9876543210",
+        aadhaarNumber: "123456789012",
+        address: "Village, District",
+        skill: "Mason",
+        defaultDailyRate: 600,
+        joiningDate: "2026-10-09",
+        companyName: "Example Company",
+        teamName: "Alpha",
+        workZone: "Mumbai",
+        overtimeHourlyRate: 60,
+        active: true,
+        notes: "",
+      },
+    ],
+    columns,
+    (record, key) => record[key],
+  );
+  const url = URL.createObjectURL(
+    new Blob([workbook], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "labour-upload-template.xlsx";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 export function BulkWorkerUploadModal({ onClose, onCompleted }) {
   const [records, setRecords] = useState([]);
   const [fileName, setFileName] = useState("");
@@ -32,35 +82,37 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
     setError("");
     setRecords([]);
     try {
-      if (!file.name.toLowerCase().endsWith(".csv")) {
-        throw new Error("Choose a CSV file, or download the template first.");
-      }
-      const [headers, ...rows] = parseCsv(await file.text());
+      const isCsv = file.name.toLowerCase().endsWith(".csv");
+      const content = isCsv
+        ? await file.text()
+        : new Uint8Array(await file.arrayBuffer());
+      const { headers, rows } = parseWorkerUploadFile(file.name, content);
       const indexes = new Map(
         headers.map((header, index) => [
-          header.replace(/[\s_-]/g, "").toLowerCase(),
+          String(header || "").replace(/[\s_-]/g, "").toLowerCase(),
           index,
         ]),
       );
-      const get = (row, key) => row[indexes.get(key.toLowerCase())] || "";
-      const parsed = rows.map((row, index) => {
+      const get = (cells, key) =>
+        String(cells[indexes.get(key.toLowerCase())] ?? "");
+      const parsed = rows.map(({ rowNumber, cells }) => {
         const worker = {
           type: "LABOUR",
-          name: get(row, "name"),
-          phone: get(row, "phone"),
-          aadhaarNumber: get(row, "aadhaarNumber"),
-          address: get(row, "address"),
-          skill: get(row, "skill"),
-          defaultDailyRate: Number(get(row, "defaultDailyRate") || 0),
-          joiningDate: get(row, "joiningDate"),
-          companyName: get(row, "companyName"),
-          teamName: get(row, "teamName"),
-          workZone: get(row, "workZone"),
-          overtimeHourlyRate: Number(get(row, "overtimeHourlyRate") || 0),
+          name: get(cells, "name"),
+          phone: get(cells, "phone"),
+          aadhaarNumber: get(cells, "aadhaarNumber"),
+          address: get(cells, "address"),
+          skill: get(cells, "skill"),
+          defaultDailyRate: Number(get(cells, "defaultDailyRate") || 0),
+          joiningDate: get(cells, "joiningDate"),
+          companyName: get(cells, "companyName"),
+          teamName: get(cells, "teamName"),
+          workZone: get(cells, "workZone"),
+          overtimeHourlyRate: Number(get(cells, "overtimeHourlyRate") || 0),
           active: !["no", "false", "0", "inactive"].includes(
-            get(row, "active").toLowerCase(),
+            get(cells, "active").toLowerCase(),
           ),
-          notes: get(row, "notes"),
+          notes: get(cells, "notes"),
         };
         const issues = [];
         if (!worker.name?.trim()) issues.push("Name required");
@@ -80,9 +132,8 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
         ) {
           issues.push("Joining date invalid");
         }
-        return { rowNumber: index + 2, worker, issues };
+        return { rowNumber, worker, issues };
       });
-      if (!rows.length) throw new Error("The CSV file has no labour rows.");
       if (parsed.length > 500) {
         throw new Error("Upload is limited to 500 labour rows at a time.");
       }
@@ -141,21 +192,30 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
     >
       <div className={styles["bulk-upload-content"]}>
         <p>
-          Upload up to 500 labour profiles from CSV. Name and work zone are
-          required; other details are optional and can be added later from each
-          profile.
+          Upload up to 500 labour profiles from CSV or Excel (.xlsx). Name and
+          work zone are required; other details are optional and can be added
+          later from each profile.
         </p>
-        <Button
-          type="button"
-          className={styles["button-secondary"]}
-          onClick={downloadTemplate}
-        >
-          Download CSV template
-        </Button>
-        <Field label="Choose labour CSV">
+        <div className={styles["modal-actions"]}>
+          <Button
+            type="button"
+            className={styles["button-secondary"]}
+            onClick={downloadTemplate}
+          >
+            Download CSV template
+          </Button>
+          <Button
+            type="button"
+            className={styles["button-secondary"]}
+            onClick={downloadExcelTemplate}
+          >
+            Download Excel template
+          </Button>
+        </div>
+        <Field label="Choose labour CSV or Excel file">
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             disabled={uploading}
             onChange={(event) => {
               const file = event.target.files?.[0];
