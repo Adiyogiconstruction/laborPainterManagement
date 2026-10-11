@@ -11,16 +11,21 @@ const workerSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true, maxlength: 100 },
     companyName: { type: String, trim: true, maxlength: 150, default: "" },
     teamName: { type: String, trim: true, maxlength: 100, default: "" },
-    phone: { type: String, required: true, trim: true, maxlength: 25 },
+    phone: { type: String, trim: true, maxlength: 25, default: "" },
     aadhaarNumber: {
       type: String,
-      required: true,
       trim: true,
-      match: [/^\d{12}$/, "Aadhaar number must contain 12 digits"],
+      default: "",
+      validate: {
+        validator(value) {
+          return value === "" || /^\d{12}$/.test(value);
+        },
+        message: "Aadhaar number must contain 12 digits",
+      },
     },
-    address: { type: String, required: true, trim: true, maxlength: 350 },
-    skill: { type: String, required: true, trim: true, maxlength: 100 },
-    workZone: { type: String, trim: true, maxlength: 100, default: "" },
+    address: { type: String, trim: true, maxlength: 350, default: "" },
+    skill: { type: String, trim: true, maxlength: 100, default: "" },
+    workZone: { type: String, required: true, trim: true, maxlength: 100, default: "" },
     photoPath: { type: String, trim: true, default: "" },
     photoUrl: { type: String, trim: true, default: "" },
     photoPublicId: { type: String, trim: true, default: "" },
@@ -31,9 +36,9 @@ const workerSchema = new mongoose.Schema(
     aadhaarFrontPublicId: { type: String, trim: true, default: "" },
     aadhaarBackPublicId: { type: String, trim: true, default: "" },
     ppeKitIssuedOn: { type: Date, default: null },
-    defaultDailyRate: { type: Number, required: true, min: 0 },
+    defaultDailyRate: { type: Number, min: 0, default: 0 },
     overtimeHourlyRate: { type: Number, min: 0, default: 0 },
-    joiningDate: { type: Date, required: true },
+    joiningDate: { type: Date, default: null },
     active: { type: Boolean, default: true },
     statusHistory: {
       type: [

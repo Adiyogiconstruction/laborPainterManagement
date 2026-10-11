@@ -51,7 +51,7 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
           aadhaarNumber: get(row, "aadhaarNumber"),
           address: get(row, "address"),
           skill: get(row, "skill"),
-          defaultDailyRate: Number(get(row, "defaultDailyRate")),
+          defaultDailyRate: Number(get(row, "defaultDailyRate") || 0),
           joiningDate: get(row, "joiningDate"),
           companyName: get(row, "companyName"),
           teamName: get(row, "teamName"),
@@ -63,13 +63,11 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
           notes: get(row, "notes"),
         };
         const issues = [];
-        if (!worker.name) issues.push("Name required");
-        if (!worker.phone) issues.push("Phone required");
-        if (!/^\d{12}$/.test(worker.aadhaarNumber)) {
+        if (!worker.name?.trim()) issues.push("Name required");
+        if (!worker.workZone?.trim()) issues.push("Work zone required");
+        if (worker.aadhaarNumber && !/^\d{12}$/.test(worker.aadhaarNumber)) {
           issues.push("Aadhaar must be 12 digits");
         }
-        if (!worker.address) issues.push("Address required");
-        if (!worker.skill) issues.push("Skill required");
         if (
           !Number.isFinite(worker.defaultDailyRate) ||
           worker.defaultDailyRate < 0
@@ -77,7 +75,7 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
           issues.push("Daily rate invalid");
         }
         if (
-          !worker.joiningDate ||
+          worker.joiningDate &&
           Number.isNaN(Date.parse(worker.joiningDate))
         ) {
           issues.push("Joining date invalid");
@@ -143,9 +141,9 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
     >
       <div className={styles["bulk-upload-content"]}>
         <p>
-          Upload up to 500 labour profiles from CSV. Name, phone, Aadhaar,
-          address, skill, daily rate and joining date are required. Photos and
-          documents can be added later from each profile.
+          Upload up to 500 labour profiles from CSV. Name and work zone are
+          required; other details are optional and can be added later from each
+          profile.
         </p>
         <Button
           type="button"

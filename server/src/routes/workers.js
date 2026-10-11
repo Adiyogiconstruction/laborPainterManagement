@@ -2,12 +2,15 @@ import { Router } from "express";
 import Worker from "../models/Worker.js";
 import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
+import CompanyClient from "../models/CompanyClient.js";
+import CompanyWorkerRate from "../models/CompanyWorkerRate.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { parseWorkerSearch } from "../utils/workerSearch.js";
 import { appendWorkerStatusTransition } from "../utils/workerStatusHistory.js";
+import { parseLocalDateOnly } from "../utils/localDateRange.js";
 import multer from "multer";
 import {
   authenticatedImageUrl,
@@ -66,6 +69,61 @@ const normalizeWorkerFields = (data) => {
       data[field] = normalizeWorkerText(data[field]);
   }
   return data;
+};
+
+const syncWorkerSalaryRate = async (worker, userId) => {
+  if (!worker.companyName) return;
+  const company = await CompanyClient.findOne({ name: worker.companyName })
+    .select("_id companyLabourRate")
+    .lean();
+  if (!company) return;
+  const now = new Date();
+  const applicableFrom = new Date(
+    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
+  );
+  const existingRate = await CompanyWorkerRate.findOne({
+    company: company._id,
+    worker: worker._id,
+    applicableFrom: { $lte: applicableFrom },
+  })
+    .sort({ applicableFrom: -1 })
+    .lean();
+  await CompanyWorkerRate.updateOne(
+    { company: company._id, worker: worker._id, applicableFrom },
+    {
+      $set: {
+        companyDailyRate:
+          existingRate?.companyDailyRate ?? company.companyLabourRate ?? 0,
+        labourDailyRate: Number(worker.defaultDailyRate || 0),
+        labourOvertimeRate: Number(worker.overtimeHourlyRate || 0),
+      },
+      $setOnInsert: {
+        company: company._id,
+        worker: worker._id,
+        applicableFrom,
+        createdBy: userId,
+      },
+    },
+    { upsert: true, runValidators: true },
+  );
+};
+
+const validateCompanyZone = async (companyName, workZone) => {
+  if (!companyName || !workZone) return;
+  const company = await CompanyClient.findOne({ name: companyName })
+    .select("zones")
+    .lean();
+  if (
+    company?.zones?.length &&
+    !company.zones.some(
+      (zone) => zone.toLocaleLowerCase() === workZone.toLocaleLowerCase(),
+    )
+  ) {
+    throw new ApiError(
+      400,
+      "Select a work zone configured for the selected company.",
+    );
+  }
 };
 
 router.get(
@@ -242,22 +300,10 @@ router.post(
       ...pick(req.body, editable),
       type: "LABOUR",
     });
-    if (
-      !data.type ||
-      !data.name ||
-      !data.phone ||
-      !data.aadhaarNumber ||
-      !data.address ||
-      !data.skill ||
-      data.defaultDailyRate === undefined ||
-      data.defaultDailyRate === null ||
-      !data.joiningDate
-    ) {
-      throw new ApiError(
-        400,
-        "Worker type, name, phone, Aadhaar, address, skill, daily rate and joining date are required.",
-      );
+    if (!data.type || !String(data.name || "").trim() || !String(data.workZone || "").trim()) {
+      throw new ApiError(400, "Name and work zone are required.");
     }
+    await validateCompanyZone(data.companyName, data.workZone);
     const worker = new Worker(data);
     worker.statusHistory = [
       {
@@ -287,23 +333,14 @@ router.patch(
       ...normalizeWorkerFields(pick(req.body, editable)),
       type: "LABOUR",
     };
-    if (
-      !data.type ||
-      !data.name ||
-      !data.phone ||
-      !data.aadhaarNumber ||
-      !data.address ||
-      !data.skill ||
-      data.defaultDailyRate === undefined ||
-      data.defaultDailyRate === null ||
-      !data.joiningDate
-    ) {
-      throw new ApiError(
-        400,
-        "Worker type, name, phone, Aadhaar, address, skill, daily rate and joining date are required.",
-      );
+    if (!data.type || !String(data.name || "").trim() || !String(data.workZone || "").trim()) {
+      throw new ApiError(400, "Name and work zone are required.");
     }
     const updates = normalizeWorkerFields(pick(req.body, editable));
+    await validateCompanyZone(
+      updates.companyName ?? existing.companyName,
+      updates.workZone ?? existing.workZone,
+    );
     const previousStatus = existing.active ?? true;
     existing.set({ ...updates, type: "LABOUR" });
     const nextStatus = existing.active ?? true;
@@ -315,6 +352,12 @@ router.patch(
       );
     }
     const worker = await existing.save();
+    if (
+      updates.defaultDailyRate !== undefined ||
+      updates.overtimeHourlyRate !== undefined
+    ) {
+      await syncWorkerSalaryRate(worker, req.user.id);
+    }
     await recordAdminActivity(
       req,
       "UPDATE",
@@ -458,16 +501,20 @@ router.get(
     if (!worker) throw new ApiError(404, "Worker not found.");
     const dateFilter = {};
     if (req.query.from) {
-      const from = new Date(`${req.query.from}T00:00:00.000Z`);
-      if (Number.isNaN(from.getTime()))
+      try {
+        dateFilter.$gte = parseLocalDateOnly(req.query.from);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
         throw new ApiError(400, "Invalid start date.");
-      dateFilter.$gte = from;
+      }
     }
     if (req.query.to) {
-      const to = new Date(`${req.query.to}T23:59:59.999Z`);
-      if (Number.isNaN(to.getTime()))
+      try {
+        dateFilter.$lte = parseLocalDateOnly(req.query.to, true);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
         throw new ApiError(400, "Invalid end date.");
-      dateFilter.$lte = to;
+      }
     }
     if (
       dateFilter.$gte &&
@@ -508,7 +555,12 @@ router.get(
               presentDays: {
                 $sum: {
                   $cond: [
-                    { $in: ["$status", ["PRESENT", "DOUBLE_PRESENT"]] },
+                    {
+                      $in: [
+                        "$status",
+                        ["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT"],
+                      ],
+                    },
                     1,
                     0,
                   ],
@@ -516,6 +568,9 @@ router.get(
               },
               doubleDays: {
                 $sum: { $cond: [{ $eq: ["$status", "DOUBLE_PRESENT"] }, 1, 0] },
+              },
+              tripleDays: {
+                $sum: { $cond: [{ $eq: ["$status", "TRIPLE_PRESENT"] }, 1, 0] },
               },
               halfDays: {
                 $sum: { $cond: [{ $eq: ["$status", "HALF_DAY"] }, 1, 0] },

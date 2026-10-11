@@ -53,6 +53,19 @@ test("payable amount includes the rate snapshot and overtime", () => {
 
 test("double-present and overtime are calculated separately", () => {
   assert.equal(getWorkUnits("2P"), 2);
+  assert.equal(normalizeAttendanceStatus("P+P"), "DOUBLE_PRESENT");
+  assert.equal(normalizeAttendanceStatus("P+P+P"), "TRIPLE_PRESENT");
+  assert.equal(normalizeAttendanceStatus("P+P+P+4"), "TRIPLE_PRESENT");
+  assert.equal(getWorkUnits("TRIPLE_PRESENT"), 3);
+  assert.equal(
+    calculatePayableAmount({
+      dailyRate: 500,
+      overtimeHours: 4,
+      overtimeRate: 100,
+      status: "TRIPLE_PRESENT",
+    }),
+    1900,
+  );
   assert.equal(
     calculatePayableAmount({
       dailyRate: 500,

@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import AdminSession from "../models/AdminSession.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import {
   getSessionToken,
@@ -34,6 +35,18 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
     const user = await User.findById(payload.sub);
     if (!user || !user.active)
       throw new ApiError(401, "This account is no longer active.");
+    if (!payload.sid) {
+      throw new ApiError(401, "Your session has expired. Please sign in again.");
+    }
+    const session = await AdminSession.findOne({
+      _id: payload.sid,
+      user: user._id,
+      endedAt: null,
+      expiresAt: { $gt: new Date() },
+    }).select("_id");
+    if (!session) {
+      throw new ApiError(401, "Your session has expired. Please sign in again.");
+    }
     req.user = user;
     req.sessionId = payload.sid || null;
     next();

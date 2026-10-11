@@ -49,14 +49,29 @@
   .metric-grid.dashboard-metrics-secondary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .dashboard-company-charts {
+  .dashboard-zone-charts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .dashboard-company-charts > .panel:last-child {
+  .dashboard-zone-charts > .panel:last-child {
     grid-column: 1 / -1;
   }
   .dashboard-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-client-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-detail-panel > .panel-header,
+  .company-profit-panel > .panel-header {
+    flex-wrap: wrap;
+  }
+  .company-detail-panel > .panel-header > :first-child,
+  .company-profit-panel > .panel-header > :first-child {
+    flex: 1 1 100%;
+  }
+  .company-detail-filters {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .content-grid.two-one > .panel:last-child {
     max-width: none;
@@ -230,6 +245,40 @@
   }
   .sidebar-open {
     transform: translateX(0);
+    background: #000;
+    color: #fff;
+  }
+  .sidebar-open .sidebar-brand strong,
+  .sidebar-open .sidebar-brand span,
+  .sidebar-open .nav-group-label,
+  .sidebar-open nav a,
+  .sidebar-open nav a.active,
+  .sidebar-open nav a.nav-primary,
+  .sidebar-open nav a.nav-primary:hover,
+  .sidebar-open nav a.nav-primary.active,
+  .sidebar-open .profile strong,
+  .sidebar-open .profile span {
+    color: #fff;
+  }
+  .sidebar-open nav a,
+  .sidebar-open nav a:hover,
+  .sidebar-open nav a.active,
+  .sidebar-open nav a.nav-primary,
+  .sidebar-open nav a.nav-primary:hover,
+  .sidebar-open nav a.nav-primary.active {
+    background: #000;
+    box-shadow: none;
+  }
+  .sidebar-open nav a:hover,
+  .sidebar-open nav a.active,
+  .sidebar-open nav a.nav-primary:hover,
+  .sidebar-open nav a.nav-primary.active {
+    background: #1b1b1b;
+  }
+  .sidebar-open nav a svg,
+  .sidebar-open .mobile-close,
+  .sidebar-open .profile .icon-button {
+    color: #ff9833;
   }
   .sidebar-scrim {
     display: block;
@@ -402,47 +451,192 @@
   .dashboard-metrics-primary .metric small {
     font-size: 9px;
   }
-  .dashboard-company-charts,
+  .dashboard-zone-charts,
   .dashboard-summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .company-client-form {
     grid-template-columns: minmax(0, 1fr);
   }
+  .company-zone-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    gap: 6px;
+    padding: 7px;
+  }
+  .company-zone-edit-row > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .company-zone-edit-owner-only {
+    grid-column: 1 / -1;
+  }
+  .company-client-form > .field:nth-child(3) {
+    grid-column: 1 / -1;
+  }
   .company-client-form-actions {
     justify-content: flex-end;
   }
+  .company-detail-panel > .panel-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .company-detail-panel > .panel-header > :first-child {
+    width: 100%;
+  }
+  .company-detail-filters {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px 7px;
+  }
+  .company-detail-filters .field {
+    gap: 2px;
+    font-size: 9px;
+  }
+  .company-detail-filters input,
+  .company-detail-filters select {
+    width: 100%;
+    min-width: 0;
+    min-height: 29px;
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+  .company-detail-filters > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .company-detail-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+  .company-detail-summary article {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 7px;
+  }
+  .company-detail-summary article > svg {
+    padding: 5px;
+    width: 15px;
+    height: 15px;
+  }
+  .company-detail-summary small {
+    font-size: 8px;
+    line-height: 1.2;
+    white-space: normal;
+  }
+  .company-detail-summary strong {
+    font-size: clamp(11px, 3.6vw, 15px);
+  }
+  .company-detail-breakdown {
+    padding: 7px;
+  }
+  .company-detail-breakdown h3 {
+    font-size: 12px;
+  }
+  .company-detail-breakdown > p {
+    font-size: 9px;
+  }
+  .company-detail-breakdown .table-wrap .company-detail-table th,
+  .company-detail-breakdown .table-wrap .company-detail-table td {
+    padding: 7px;
+  }
+  .company-worker-rate-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(100%, calc(100vw - 52px));
+    max-width: 420px;
+    gap: 6px;
+    padding-top: 6px;
+  }
+  .company-worker-rates-row details {
+    width: 100%;
+  }
+  .company-worker-rate-form .field {
+    gap: 2px;
+    font-size: 9px;
+  }
+  .company-worker-rate-form input {
+    width: 100%;
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+  .company-worker-rate-form .button {
+    grid-column: 1 / -1;
+  }
+  .company-worker-rate-form .field:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .company-worker-rate-form .button {
+    width: 100%;
+    min-height: 32px;
+    justify-content: center;
+  }
   .company-client-list {
     grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
   }
-  .company-profit-panel > .panel-header {
-    align-items: center;
+  .company-client-list-panel,
+  .company-profit-panel,
+  .company-detail-panel {
+    padding: 11px;
+    border-radius: 11px;
   }
-  .company-profit-panel > .panel-header > :first-child {
-    flex: 1 1 auto;
+  .company-client-list-panel .panel-header,
+  .company-profit-panel .panel-header {
+    gap: 6px;
+    margin-bottom: 9px;
   }
-  .company-profit-panel .company-profit-period {
-    flex: 0 0 auto;
+  .company-client-list-panel .panel-header h2,
+  .company-profit-panel .panel-header h2,
+  .company-detail-panel .panel-header h2 {
+    font-size: 13px;
+  }
+  .company-client-list-panel .panel-header p,
+  .company-profit-panel .panel-header p,
+  .company-detail-panel .panel-header p {
+    font-size: 10px;
+    line-height: 1.35;
   }
   .company-profit-custom-range,
   .company-profit-filters {
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 5px 7px;
+    margin-bottom: 6px;
   }
   .company-profit-custom-range .field {
-    flex: 1 1 130px;
-    width: auto;
+    width: 100%;
+    min-width: 0;
+    gap: 2px;
+    font-size: 9px;
+  }
+  .company-profit-custom-range input {
+    width: 100%;
+    min-width: 0;
+    min-height: 29px;
+    padding: 4px 6px;
+    font-size: 10px;
   }
   .company-profit-filters label {
-    flex: 1 1 145px;
-    justify-content: space-between;
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    font-size: 9px;
   }
   .company-profit-filters select {
+    width: 100%;
     min-width: 0;
-    max-width: 65%;
+    max-width: none;
+    min-height: 29px;
+    padding: 4px 6px;
+    font-size: 10px;
   }
   .company-profit-filter-count {
+    grid-column: 1 / -1;
     width: 100%;
     margin-left: 0;
+    font-size: 9px;
   }
   .company-profit-strip {
     margin-right: -2px;
@@ -454,6 +648,18 @@
     justify-content: space-between;
     gap: 8px;
   }
+  .company-client-collapse {
+    display: inline-flex;
+    width: auto;
+    min-width: 92px;
+    min-height: 32px;
+    justify-content: center;
+    padding: 5px 9px;
+    white-space: nowrap;
+  }
+  .company-client-list-collapsed .company-client-list-content {
+    display: none;
+  }
   .company-client-list-panel .panel-header > .company-client-list-actions {
     width: 100%;
   }
@@ -464,9 +670,11 @@
   .company-client-row {
     grid-template-columns: 34px minmax(0, 1fr);
     gap: 8px;
-    padding: 10px;
+    padding: 8px;
   }
   .company-client-row .actions-inline {
+    grid-column: 1 / -1;
+    grid-row: auto;
     justify-content: stretch;
     gap: 8px;
   }
@@ -520,11 +728,11 @@
   .company-assignment-row-end {
     justify-content: space-between;
   }
-  .dashboard-company-charts > .panel:last-child,
+  .dashboard-zone-charts > .panel:last-child,
   .dashboard-summary-grid > .panel:last-child {
     grid-column: auto;
   }
-  .dashboard-company-charts > .panel {
+  .dashboard-zone-charts > .panel {
     min-height: 0;
   }
   .dashboard-summary-grid .money-list {
@@ -793,23 +1001,94 @@
   }
   .login-screen {
     grid-template-columns: 1fr;
+    background: #f8fbfa;
   }
   .login-copy {
     display: none;
   }
   .login-card {
-    min-height: 100vh;
-    padding: 45px 28px;
+    min-height: 100svh;
+    padding: 0 28px 45px;
+    background: #f8fbfa;
+    background: transparent;
+  }
+  .login-mobile-brand {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 -28px 30px;
+    padding: 16px 20px 26px;
+    border-radius: 0 0 28px 28px;
+    background:
+      radial-gradient(
+        ellipse at 50% 32%,
+        #593718 0,
+        #3b250f 48%,
+        #2f1b0b 82%
+      );
+    box-shadow: 0 12px 28px rgba(47, 27, 11, 0.12);
+  }
+  .login-mobile-brand::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+  .login-mobile-brand::before {
+    background: radial-gradient(
+      circle at 50% 40%,
+      transparent 0,
+      transparent 45%,
+      rgba(255, 255, 255, 0.1) 45.2%,
+      transparent 45.6%
+    );
   }
   .brand-mobile {
     display: block;
-    width: 125px;
-    height: 92px;
+    width: min(190px, 58vw);
+    height: min(155px, 42vw);
     object-fit: contain;
-    margin-bottom: 22px;
+    margin: 0 auto 5px;
+  }
+  .brand-mobile-name {
+    display: block;
+    margin: 0;
+    color: #fff;
+    font-size: 24px;
+    letter-spacing: -0.5px;
+    text-align: center;
+  }
+  .brand-mobile-tagline {
+    display: block;
+    margin-top: 5px;
+    color: #e1e1e1;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+  }
+  .login-card {
+    background: transparent;
   }
 }
 @media (max-width: 479px) {
+  .company-detail-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-detail-filters > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .company-detail-summary strong {
+    font-size: 18px;
+  }
+  .company-worker-rate-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(100%, calc(100vw - 44px));
+    max-width: 380px;
+  }
   .khata-balance-tabs {
     gap: 2px;
   }
@@ -903,7 +1182,7 @@
   }
   .login-card {
     min-height: 100svh;
-    padding: 28px 20px calc(28px + env(safe-area-inset-bottom));
+    padding: 0 20px max(16px, env(safe-area-inset-bottom));
   }
   .money-donut-wrap {
     grid-template-columns: minmax(0, 1fr);

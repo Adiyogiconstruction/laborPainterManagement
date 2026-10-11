@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-  "dev": "nodemon src/server.js",
-  "start": "node src/server.js",
-  "check": "node --check src/server.js",
-  "build": "echo No build required"
-},
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js",
+    "build": "echo No build required"
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.11.0",
@@ -20,7 +20,8 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "nodemailer": "^7.0.13"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

@@ -28,6 +28,7 @@ const statusMeta = {
   NOT_MARKED: { tone: "neutral", label: "Not marked", Icon: CalendarDays },
   PRESENT: { tone: "teal", label: "Present", Icon: CheckCircle2 },
   DOUBLE_PRESENT: { tone: "purple", label: "2P / Double", Icon: CheckCircle2 },
+  TRIPLE_PRESENT: { tone: "purple", label: "3P / Triple", Icon: CheckCircle2 },
   ABSENT: { tone: "coral", label: "Absent", Icon: XCircle },
   HALF_DAY: { tone: "amber", label: "Half day", Icon: Clock3 },
   LEAVE: { tone: "blue", label: "Leave", Icon: Coffee },
@@ -77,7 +78,9 @@ function MonthlyAttendance() {
 
     if (key === "Backspace" || key === "Delete") {
       event.preventDefault();
-      updateCell(input.dataset.worker, col + 1, "");
+      const currentValue = String(input.value || "");
+      const nextValue = currentValue.slice(0, -1);
+      updateCell(input.dataset.worker, col + 1, nextValue);
       return;
     }
 
@@ -121,6 +124,10 @@ function MonthlyAttendance() {
         nextCells[`${item.worker}:${item.date}`] = {
           status: item.status,
           overtimeHours: Number(item.overtimeHours || 0),
+          dailyRate:
+            item.dailyRate == null ? undefined : Number(item.dailyRate),
+          overtimeRate:
+            item.overtimeRate == null ? undefined : Number(item.overtimeRate),
           payableAmount: Number(item.payableAmount || 0),
         };
       });
@@ -186,6 +193,10 @@ function MonthlyAttendance() {
   const codeFor = (cell) => {
     if (cell.status === "PRESENT" && cell.overtimeHours > 0)
       return `P+${cell.overtimeHours}`;
+    if (cell.status === "TRIPLE_PRESENT")
+      return cell.overtimeHours > 0
+        ? `P+P+P+${cell.overtimeHours}`
+        : "P+P+P";
     if (cell.status === "DOUBLE_PRESENT")
       return cell.overtimeHours > 0 ? `P+P+${cell.overtimeHours}` : "P+P";
     if (cell.status === "PRESENT") return "P";
@@ -202,8 +213,10 @@ function MonthlyAttendance() {
       if (dateKey < periodStart || dateKey > periodEnd) continue;
       const cell = cellFor(worker._id, day);
       normalDays +=
-        cell.status === "DOUBLE_PRESENT"
-          ? 2
+        cell.status === "TRIPLE_PRESENT"
+          ? 3
+          : cell.status === "DOUBLE_PRESENT"
+            ? 2
           : cell.status === "PRESENT"
             ? 1
             : cell.status === "HALF_DAY"
@@ -219,36 +232,66 @@ function MonthlyAttendance() {
       .toUpperCase()
       .replaceAll(" ", "");
     if (!code) return { status: "NOT_MARKED", overtimeHours: 0 };
-    if (code === "P+P") return { status: "DOUBLE_PRESENT", overtimeHours: 0 };
-    const doublePresentOvertime = code.match(/^P\+P\+(\d+(?:\.\d+)?)$/);
-    if (doublePresentOvertime) {
-      return {
-        status: "DOUBLE_PRESENT",
-        overtimeHours: Number(doublePresentOvertime[1]),
-      };
-    }
     if (code === "P") return { status: "PRESENT", overtimeHours: 0 };
     if (code === "A") return { status: "ABSENT", overtimeHours: 0 };
     if (code === "H") return { status: "HALF_DAY", overtimeHours: 0 };
     if (code === "L") return { status: "LEAVE", overtimeHours: 0 };
-    const overtime = code.match(/^P\+(\d+(?:\.\d+)?)$/);
-    if (overtime) {
-      return { status: "PRESENT", overtimeHours: Number(overtime[1]) };
+
+    const repeatedPresent = code.match(
+      /^(P(?:\+P)+)(?:\+(\d+(?:\.\d+)?))?$/,
+    );
+    if (repeatedPresent) {
+      return {
+        status:
+          repeatedPresent[1].split("+").length === 3
+            ? "TRIPLE_PRESENT"
+            : "DOUBLE_PRESENT",
+        overtimeHours: Number(repeatedPresent[2] || 0),
+      };
     }
+
+    const presentWithOvertime = code.match(/^P\+(\d+(?:\.\d+)?)$/);
+    if (presentWithOvertime) {
+      return {
+        status: "PRESENT",
+        overtimeHours: Number(presentWithOvertime[1]),
+      };
+    }
+
     return null;
   };
-  const payableFor = (worker, cell) => {
+  const payableFor = (worker, cell, dateKey) => {
     const workUnits =
-      cell.status === "DOUBLE_PRESENT"
-        ? 2
+      cell.status === "TRIPLE_PRESENT"
+        ? 3
+        : cell.status === "DOUBLE_PRESENT"
+          ? 2
         : cell.status === "PRESENT"
           ? 1
           : cell.status === "HALF_DAY"
             ? 0.5
             : 0;
+    let effectiveRate;
+    for (const rate of worker.rateHistory || []) {
+      if (rate.applicableFrom > dateKey) break;
+      effectiveRate = rate;
+    }
     return (
-      Number(worker.dailyRate || worker.defaultDailyRate || 0) * workUnits +
-      Number(cell.overtimeHours || 0) * Number(worker.overtimeHourlyRate || 0)
+      Number(
+        cell.dailyRate ??
+          effectiveRate?.dailyRate ??
+          worker.dailyRate ??
+          worker.defaultDailyRate ??
+          0,
+      ) *
+        workUnits +
+      Number(cell.overtimeHours || 0) *
+        Number(
+          cell.overtimeRate ??
+            effectiveRate?.overtimeRate ??
+            worker.overtimeHourlyRate ??
+            0,
+        )
     );
   };
   const updateCell = (workerId, day, value) => {
@@ -263,11 +306,22 @@ function MonthlyAttendance() {
     const next = parseCode(uppercaseValue);
     if (!next) return;
     const worker = data.workers.find((item) => item._id === workerId);
+    const existingCell = cellFor(workerId, day);
     setCells((currentCells) => ({
       ...currentCells,
       [key]: {
         ...next,
-        payableAmount: worker ? payableFor(worker, next) : 0,
+        payableAmount: worker
+          ? payableFor(
+              worker,
+              {
+                ...next,
+                dailyRate: existingCell.dailyRate,
+                overtimeRate: existingCell.overtimeRate,
+              },
+              dateKey,
+            )
+          : 0,
       },
     }));
     setSaved(false);
@@ -340,8 +394,10 @@ function MonthlyAttendance() {
           if (dateKey < periodStart || dateKey > periodEnd) return "";
           const cell = cellFor(worker._id, day);
           normalDays +=
-            cell.status === "DOUBLE_PRESENT"
-              ? 2
+            cell.status === "TRIPLE_PRESENT"
+              ? 3
+              : cell.status === "DOUBLE_PRESENT"
+                ? 2
               : cell.status === "PRESENT"
                 ? 1
                 : cell.status === "HALF_DAY"
@@ -498,6 +554,7 @@ function MonthlyAttendance() {
           {[
             ["PRESENT", "Total present", "teal"],
             ["DOUBLE_PRESENT", "Total double present", "purple"],
+            ["TRIPLE_PRESENT", "Total triple present", "purple"],
             ["ABSENT", "Total absent", "coral"],
             ["HALF_DAY", "Total half day", "amber"],
             ["LEAVE", "Total leave", "blue"],
@@ -558,9 +615,14 @@ function MonthlyAttendance() {
                   for (let day = 1; day <= data.days; day += 1) {
                     const dateKey = `${month}-${String(day).padStart(2, "0")}`;
                     if (dateKey >= periodStart && dateKey <= periodEnd) {
+                      const cell = cellFor(worker._id, day);
                       total += Number(
-                        cellFor(worker._id, day).payableAmount ||
-                          payableFor(worker, cellFor(worker._id, day)),
+                        cell.payableAmount ??
+                          payableFor(
+                            worker,
+                            cell,
+                            `${month}-${String(day).padStart(2, "0")}`,
+                          ),
                       );
                     }
                   }
@@ -650,7 +712,7 @@ function MonthlyAttendance() {
                         <td key={day}>
                           <input
                             type="text"
-                            maxLength="6"
+                            maxLength="20"
                             value={
                               drafts[
                                 `${worker._id}:${month}-${String(day).padStart(2, "0")}`
@@ -694,6 +756,7 @@ export function AttendancePage() {
   const [summary, setSummary] = useState({
     NOT_MARKED: 0,
     DOUBLE_PRESENT: 0,
+    TRIPLE_PRESENT: 0,
     PRESENT: 0,
     HALF_DAY: 0,
     ABSENT: 0,
@@ -750,6 +813,7 @@ export function AttendancePage() {
         nextSummary || {
           NOT_MARKED: 0,
           DOUBLE_PRESENT: 0,
+          TRIPLE_PRESENT: 0,
           PRESENT: 0,
           HALF_DAY: 0,
           ABSENT: 0,
@@ -907,6 +971,7 @@ export function AttendancePage() {
         {[
           ["PRESENT", "Present", "teal"],
           ["DOUBLE_PRESENT", "2P / Double", "purple"],
+          ["TRIPLE_PRESENT", "3P / Triple", "purple"],
           ["HALF_DAY", "Half day", "amber"],
           ["ABSENT", "Absent", "coral"],
           ["LEAVE", "Leave", "blue"],

@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -8,7 +8,6 @@ import {
   CalendarDays,
   Clock3,
   IndianRupee,
-  RefreshCcw,
   UserRoundCheck,
   UserRoundX,
   UsersRound,
@@ -74,32 +73,64 @@ export function DashboardPage() {
     workZone: "",
   });
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const load = () =>
-    request(api.get("/dashboard/summary", { params: { type: businessType } }))
-      .then(setData)
-      .catch((err) => setError(errorMessage(err)));
+  const refreshInProgress = useRef(false);
+  const load = useCallback(
+    () =>
+      request(api.get("/dashboard/summary", { params: { type: businessType } }))
+        .then(setData)
+        .catch((err) => setError(errorMessage(err))),
+    [businessType],
+  );
+  const loadAnalytics = useCallback(
+    () =>
+      request(
+        api.get("/dashboard/analytics", {
+          params: {
+            from,
+            to,
+            period,
+            type: businessType,
+            ...Object.fromEntries(
+              Object.entries(analyticsFilters).filter(([, value]) => value),
+            ),
+          },
+        }),
+      )
+        .then(setAnalytics)
+        .catch((err) => setError(errorMessage(err))),
+    [from, to, period, ...Object.values(analyticsFilters)],
+  );
   useEffect(() => {
-    load();
-  }, [businessType]);
-  const loadAnalytics = () =>
-    request(
-      api.get("/dashboard/analytics", {
-        params: {
-          from,
-          to,
-          period,
-          type: businessType,
-          ...Object.fromEntries(
-            Object.entries(analyticsFilters).filter(([, value]) => value),
-          ),
-        },
-      }),
-    )
-      .then(setAnalytics)
-      .catch((err) => setError(errorMessage(err)));
-  useEffect(() => {
-    loadAnalytics();
-  }, [from, to, period, ...Object.values(analyticsFilters)]);
+    const refresh = async () => {
+      if (
+        document.visibilityState !== "visible" ||
+        refreshInProgress.current
+      ) {
+        return;
+      }
+      refreshInProgress.current = true;
+      try {
+        await Promise.all([load(), loadAnalytics()]);
+      } finally {
+        refreshInProgress.current = false;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    refresh();
+    const intervalId = window.setInterval(refresh, 10_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+    };
+  }, [load, loadAnalytics]);
   const updatePeriod = (event) => {
     const nextPeriod = event.target.value;
     setPeriod(nextPeriod);
@@ -132,19 +163,19 @@ export function DashboardPage() {
   const { latestPayments } = data;
   const attendanceRows = analytics?.attendanceByDate || [];
   const dueRows = analytics?.dueByWorker || [];
-  const companyRows = analytics?.companySummary || [];
-  const companyMaxLabour = Math.max(
+  const zoneRows = analytics?.zoneSummary || [];
+  const zoneMaxLabour = Math.max(
     1,
-    ...companyRows.flatMap((item) => [
+    ...zoneRows.flatMap((item) => [
       item.labour,
       item.present,
       item.absent,
     ]),
   );
-  const companyMaxAttendance = 100;
-  const companyMaxPayable = Math.max(
+  const zoneMaxAttendance = 100;
+  const zoneMaxPayable = Math.max(
     1,
-    ...companyRows.flatMap((item) => [item.payable, item.paid]),
+    ...zoneRows.flatMap((item) => [item.payable, item.paid]),
   );
   const attendanceSummary = attendanceRows.reduce(
     (accumulator, item) => {
@@ -163,18 +194,6 @@ export function DashboardPage() {
       <PageHeader
         className={styles["dashboard-page-header"]}
         title="Labour Operations Dashboard"
-        action={
-          <Button
-            icon={RefreshCcw}
-            className={`${styles["button-secondary"]}`}
-            onClick={() => {
-              load();
-              loadAnalytics();
-            }}
-          >
-            Refresh
-          </Button>
-        }
       />
       <ErrorNote error={error} />
       <Panel
@@ -355,13 +374,13 @@ export function DashboardPage() {
               icon={Wallet}
             />
           </div>
-          <div className={`${styles["content-grid"]} ${styles["dashboard-company-charts"]}`}>
+          <div className={`${styles["content-grid"]} ${styles["dashboard-zone-charts"]}`}>
             <Panel
-              title="Company-wise labour strength"
-              detail="Based on the company name saved in each current labour profile."
+              title="Zone-wise labour strength"
+              detail="Total, present, and absent labour in each work zone."
             >
               <div className={styles["dashboard-vertical-chart"]}>
-                {companyRows.length ? (
+                {zoneRows.length ? (
                   <>
                     <div className={styles["dashboard-chart-legend"]}>
                       <span><i className={styles["dashboard-bar-total"]} /> Total</span>
@@ -369,23 +388,23 @@ export function DashboardPage() {
                       <span><i className={styles["dashboard-bar-absent"]} /> Absent</span>
                     </div>
                     <div className={styles["dashboard-chart-columns"]}>
-                      {companyRows.slice(0, 6).map((company) => (
-                        <div className={styles["dashboard-chart-column"]} key={company.company}>
+                      {zoneRows.map((zone) => (
+                        <div className={styles["dashboard-chart-column"]} key={zone.zone}>
                           <div className={styles["dashboard-chart-stage"]}>
                             {[
-                              ["Total", company.labour, "dashboard-bar-total"],
-                              ["Present", company.present, "dashboard-bar-present"],
-                              ["Absent", company.absent, "dashboard-bar-absent"],
+                              ["Total", zone.labour, "dashboard-bar-total"],
+                              ["Present", zone.present, "dashboard-bar-present"],
+                              ["Absent", zone.absent, "dashboard-bar-absent"],
                             ].map(([label, value, tone]) => {
                               const height = Math.min(
                                 100,
-                                (Number(value || 0) / companyMaxLabour) * 100,
+                                (Number(value || 0) / zoneMaxLabour) * 100,
                               );
                               return (
                                 <div
                                   className={styles["dashboard-chart-bar"]}
                                   key={label}
-                                  title={`${company.company} · ${label}: ${chartValue(value)}`}
+                                  title={`${zone.zone} · ${label}: ${chartValue(value)}`}
                                   style={{ "--bar-height": `${height}%` }}
                                 >
                                   <span>{chartValue(value)}</span>
@@ -394,51 +413,51 @@ export function DashboardPage() {
                               );
                             })}
                           </div>
-                          <strong className={styles["dashboard-chart-label"]} title={company.company}>
-                            {company.company}
+                          <strong className={styles["dashboard-chart-label"]} title={zone.zone}>
+                            {zone.zone}
                           </strong>
                           <small className={styles["dashboard-chart-detail"]}>
-                            {chartValue(company.unmarked)} unmarked
+                            {chartValue(zone.unmarked)} unmarked
                           </small>
                         </div>
                       ))}
                     </div>
                   </>
                 ) : (
-                  <Empty title="No company labour in this selection" />
+                  <Empty title="No zone labour in this selection" />
                 )}
               </div>
             </Panel>
             <Panel
-              title="Company attendance rate"
-              detail="Present attendance entries compared with expected labour days."
+              title="Zone-wise attendance rate"
+              detail="Percentage of expected labour days marked present in each zone."
             >
               <div className={styles["dashboard-vertical-chart"]}>
-                {companyRows.length ? (
+                {zoneRows.length ? (
                   <>
                     <div className={styles["dashboard-chart-legend"]}>
                       <span><i className={styles["dashboard-bar-rate"]} /> Attendance rate</span>
                     </div>
                     <div className={styles["dashboard-chart-columns"]}>
-                      {companyRows.slice(0, 6).map((company) => {
+                      {zoneRows.map((zone) => {
                         const height = Math.min(
                           100,
-                          (Number(company.attendanceRate || 0) / companyMaxAttendance) * 100,
+                          (Number(zone.attendanceRate || 0) / zoneMaxAttendance) * 100,
                         );
                         return (
-                          <div className={styles["dashboard-chart-column"]} key={company.company}>
+                          <div className={styles["dashboard-chart-column"]} key={zone.zone}>
                             <div className={styles["dashboard-chart-stage"]}>
                               <div
                                 className={styles["dashboard-chart-bar"]}
-                                title={`${company.company} · Attendance rate: ${company.attendanceRate}%`}
+                                title={`${zone.zone} · Attendance rate: ${zone.attendanceRate}%`}
                                 style={{ "--bar-height": `${height}%` }}
                               >
-                                <span>{company.attendanceRate}%</span>
+                                <span>{zone.attendanceRate}%</span>
                                 <i className={styles["dashboard-bar-rate"]} />
                               </div>
                             </div>
-                            <strong className={styles["dashboard-chart-label"]} title={company.company}>
-                              {company.company}
+                            <strong className={styles["dashboard-chart-label"]} title={zone.zone}>
+                              {zone.zone}
                             </strong>
                           </div>
                         );
@@ -446,38 +465,38 @@ export function DashboardPage() {
                     </div>
                   </>
                 ) : (
-                  <Empty title="No attendance in this selection" />
+                  <Empty title="No zone attendance in this selection" />
                 )}
               </div>
             </Panel>
             <Panel
-              title="Payable vs paid by company"
-              detail="Attendance-based labour cost compared with net payments in the selected period."
+              title="Payable vs paid by zone"
+              detail="Attendance-based labour cost compared with net payments in each zone."
             >
               <div className={styles["dashboard-vertical-chart"]}>
-                {companyRows.length ? (
+                {zoneRows.length ? (
                   <>
                     <div className={styles["dashboard-chart-legend"]}>
                       <span><i className={styles["dashboard-bar-payable"]} /> Payable</span>
                       <span><i className={styles["dashboard-bar-paid"]} /> Paid</span>
                     </div>
                     <div className={styles["dashboard-chart-columns"]}>
-                      {companyRows.slice(0, 6).map((company) => (
-                        <div className={styles["dashboard-chart-column"]} key={company.company}>
+                      {zoneRows.map((zone) => (
+                        <div className={styles["dashboard-chart-column"]} key={zone.zone}>
                           <div className={styles["dashboard-chart-stage"]}>
                             {[
-                              ["Payable", company.payable, "dashboard-bar-payable"],
-                              ["Paid", company.paid, "dashboard-bar-paid"],
+                              ["Payable", zone.payable, "dashboard-bar-payable"],
+                              ["Paid", zone.paid, "dashboard-bar-paid"],
                             ].map(([label, value, tone]) => {
                               const height = Math.min(
                                 100,
-                                (Number(value || 0) / companyMaxPayable) * 100,
+                                (Number(value || 0) / zoneMaxPayable) * 100,
                               );
                               return (
                                 <div
                                   className={styles["dashboard-chart-bar"]}
                                   key={label}
-                                  title={`${company.company} · ${label}: ${money(value)}`}
+                                  title={`${zone.zone} · ${label}: ${money(value)}`}
                                   style={{ "--bar-height": `${height}%` }}
                                 >
                                   <span>{compactMoney(value)}</span>
@@ -486,15 +505,15 @@ export function DashboardPage() {
                               );
                             })}
                           </div>
-                          <strong className={styles["dashboard-chart-label"]} title={company.company}>
-                            {company.company}
+                          <strong className={styles["dashboard-chart-label"]} title={zone.zone}>
+                            {zone.zone}
                           </strong>
                         </div>
                       ))}
                     </div>
                   </>
                 ) : (
-                  <Empty title="No company payments in this selection" />
+                  <Empty title="No zone payments in this selection" />
                 )}
               </div>
             </Panel>

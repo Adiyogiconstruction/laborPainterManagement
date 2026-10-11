@@ -2,6 +2,10 @@ import { Router } from "express";
 import Attendance from "../models/Attendance.js";
 import Worker from "../models/Worker.js";
 import AttendanceSheet from "../models/AttendanceSheet.js";
+import {
+  getCompanyWorkerRates,
+  loadCompanyWorkerRateHistory,
+} from "../utils/companyWorkerRates.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
@@ -58,15 +62,18 @@ router.get(
       type: "ALL",
       date: start,
     });
+    const rateContext = await loadCompanyWorkerRateHistory(workers, start);
 
     const rows = workers.map((worker) => {
       const workerId = String(worker._id);
+      const effectiveRates = getCompanyWorkerRates(worker, start, rateContext);
       const status = attendanceByWorker[workerId]?.[dateKey] || "NOT_MARKED";
       const record = records.find(
         (item) => String(item.worker?._id || item.worker) === workerId,
       );
       return {
         ...worker.toObject(),
+        overtimeHourlyRate: effectiveRates.overtimeRate,
         status,
         workUnits: record?.workUnits ?? getWorkUnits(status),
         hours: record?.hours ?? 8,
@@ -76,9 +83,8 @@ router.get(
         leaveReason: record?.leaveReason || "",
         notes: record?.notes || "",
         payableAmount: record?.payableAmount ?? 0,
-        dailyRate: record?.dailyRate ?? Number(worker.defaultDailyRate || 0),
-        overtimeRate:
-          record?.overtimeRate ?? Number(worker.overtimeHourlyRate || 0),
+        dailyRate: record?.dailyRate ?? effectiveRates.dailyRate,
+        overtimeRate: record?.overtimeRate ?? effectiveRates.overtimeRate,
         locked: Boolean(record?.locked ?? sheet?.locked),
       };
     });
@@ -92,6 +98,7 @@ router.get(
         NOT_MARKED: 0,
         PRESENT: 0,
         DOUBLE_PRESENT: 0,
+        TRIPLE_PRESENT: 0,
         HALF_DAY: 0,
         ABSENT: 0,
         LEAVE: 0,
@@ -107,6 +114,7 @@ router.get(
           LEAVE: 0,
           NOT_MARKED: 0,
           DOUBLE_PRESENT: 0,
+          TRIPLE_PRESENT: 0,
           payable: 0,
         };
         group.total += 1;
@@ -124,6 +132,7 @@ router.get(
           LEAVE: 0,
           NOT_MARKED: 0,
           DOUBLE_PRESENT: 0,
+          TRIPLE_PRESENT: 0,
           payable: 0,
         },
       },
@@ -162,7 +171,7 @@ router.get(
       Attendance.find({
         type,
         date: { $gte: start, $lt: end },
-      }).select("worker date status overtimeHours overtimeRate payableAmount"),
+      }).select("worker date status overtimeHours dailyRate overtimeRate payableAmount"),
       AttendanceSheet.findOne({
         type: "ALL",
         date: start,
@@ -173,9 +182,14 @@ router.get(
       date: toDateString(record.date),
       status: record.status,
       overtimeHours: record.overtimeHours || 0,
+      dailyRate: record.dailyRate || 0,
       overtimeRate: record.overtimeRate || 0,
       payableAmount: record.payableAmount || 0,
     }));
+    const rateContext = await loadCompanyWorkerRateHistory(
+      workers,
+      new Date(end.getTime() - 1),
+    );
     res.json({
       month,
       days,
@@ -183,7 +197,23 @@ router.get(
       canEdit: ["OWNER", "ADMIN"].includes(req.user.role),
       workers: workers.map((worker) => ({
         ...worker.toObject(),
-        dailyRate: Number(worker.defaultDailyRate || 0),
+        dailyRate: getCompanyWorkerRates(
+          worker,
+          new Date(end.getTime() - 1),
+          rateContext,
+        ).dailyRate,
+        overtimeHourlyRate: getCompanyWorkerRates(
+          worker,
+          new Date(end.getTime() - 1),
+          rateContext,
+        ).overtimeRate,
+        rateHistory: (
+          rateContext.ratesByWorker.get(String(worker._id)) || []
+        ).map((rate) => ({
+          applicableFrom: rate.applicableFrom.toISOString().slice(0, 10),
+          dailyRate: rate.labourDailyRate,
+          overtimeRate: rate.labourOvertimeRate,
+        })),
       })),
       attendance,
     });
@@ -228,6 +258,10 @@ router.post(
     const workersById = new Map(
       workers.map((worker) => [String(worker._id), worker]),
     );
+    const rateContext = await loadCompanyWorkerRateHistory(
+      workers,
+      new Date(end.getTime() - 1),
+    );
     const existingByKey = new Map(
       existingRecords.map((record) => [
         `${record.worker}:${toDateString(record.date)}`,
@@ -255,11 +289,21 @@ router.post(
       const overtimeHours = Number(
         entry.overtimeHours ?? existing?.overtimeHours ?? 0,
       );
+      const effectiveRates = getCompanyWorkerRates(
+        worker,
+        entryDate,
+        rateContext,
+      );
+      const dailyRate = Number(
+        existing?.dailyRate ?? effectiveRates.dailyRate,
+      );
       const overtimeRate = Number(
         entry.overtimeRate ??
           existing?.overtimeRate ??
-          worker.overtimeHourlyRate ??
-          0,
+          effectiveRates.overtimeRate,
+      );
+      const companyDailyRate = Number(
+        existing?.companyDailyRate ?? effectiveRates.companyDailyRate,
       );
       operations.push({
         updateOne: {
@@ -275,10 +319,12 @@ router.post(
               checkIn: existing?.checkIn || "",
               checkOut: existing?.checkOut || "",
               overtimeHours,
-              dailyRate: Number(worker.defaultDailyRate || 0),
+              dailyRate,
               overtimeRate,
+              companyDailyRate,
+              workZone: existing?.workZone || worker.workZone,
               payableAmount: calculatePayableAmount({
-                dailyRate: Number(worker.defaultDailyRate || 0),
+                dailyRate,
                 overtimeHours,
                 overtimeRate,
                 status,
@@ -348,13 +394,28 @@ router.put(
       throw new ApiError(409, "This day's attendance is locked.");
     }
     const normalizedStatus = normalizeAttendanceStatus(status);
-    const rateSnapshot = Number(workerRecord.defaultDailyRate ?? 0);
+    const rateContext = await loadCompanyWorkerRateHistory(
+      [workerRecord],
+      asDateOnly(date),
+    );
+    const effectiveRates = getCompanyWorkerRates(
+      workerRecord,
+      asDateOnly(date),
+      rateContext,
+    );
+    const rateSnapshot = Number(
+      existing?.dailyRate ?? effectiveRates.dailyRate,
+    );
     const workUnits = getWorkUnits(normalizedStatus);
     const normalizedHours = Number(hours || 8);
     const normalizedOvertime = Number(overtimeHours || 0);
     const finalOvertimeRate = Number(
-      overtimeRate ?? workerRecord.overtimeHourlyRate ?? 0,
+      overtimeRate ?? existing?.overtimeRate ?? effectiveRates.overtimeRate,
     );
+    const companyDailyRate = Number(
+      existing?.companyDailyRate ?? effectiveRates.companyDailyRate,
+    );
+    const attendanceZone = existing?.workZone || workerRecord.workZone;
     const payableAmount = calculatePayableAmount({
       dailyRate: rateSnapshot,
       overtimeHours: normalizedOvertime,
@@ -376,6 +437,8 @@ router.put(
         overtimeHours: normalizedOvertime,
         dailyRate: rateSnapshot,
         overtimeRate: finalOvertimeRate,
+        companyDailyRate,
+        workZone: attendanceZone,
         payableAmount,
         leaveReason: leaveReason || "",
         notes: notes || "",

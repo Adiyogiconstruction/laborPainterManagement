@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import AdminActivity from "../models/AdminActivity.js";
 import AdminSession from "../models/AdminSession.js";
@@ -24,6 +25,15 @@ import {
   createCaptchaChallenge,
   verifyCaptchaChallenge,
 } from "../utils/captcha.js";
+import {
+  createOwnerPasswordResetToken,
+  hashOwnerPasswordResetToken,
+  OWNER_PASSWORD_RESET_TTL_MS,
+} from "../utils/ownerPasswordReset.js";
+import {
+  assertOwnerPasswordResetEmailConfigured,
+  sendOwnerPasswordResetEmail,
+} from "../services/ownerPasswordResetEmail.js";
 
 const router = Router();
 const startAdminSession = async (user) => {
@@ -43,6 +53,20 @@ const authRateLimit = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   message: { message: "Too many authentication attempts. Try again later." },
+});
+const passwordResetRequestRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many password recovery requests. Try again later." },
+});
+const passwordResetConfirmRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many password reset attempts. Try again later." },
 });
 
 router.get(
@@ -128,6 +152,142 @@ router.post(
     const session = await startAdminSession(user);
     setSessionCookie(res, signToken(user, session.id));
     res.json({ user: safeUser(user) });
+  }),
+);
+
+router.post(
+  "/password-reset/request",
+  passwordResetRequestRateLimit,
+  asyncHandler(async (req, res) => {
+    if (
+      !verifyCaptchaChallenge(
+        req.body.captchaToken,
+        req.body.captchaCode,
+        process.env.JWT_SECRET,
+      )
+    ) {
+      throw new ApiError(400, "CAPTCHA is incorrect or expired. Try again.");
+    }
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (
+      email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      throw new ApiError(400, "Enter a valid email address.");
+    }
+    const user = await User.findOne({ email, role: "OWNER", active: true });
+    if (!user) {
+      throw new ApiError(
+        404,
+        "This email does not match an active owner account. Enter the owner's registered email address.",
+      );
+    }
+    let mailConfig;
+    try {
+      mailConfig = assertOwnerPasswordResetEmailConfigured();
+    } catch (error) {
+      throw new ApiError(503, error.message);
+    }
+
+    const token = createOwnerPasswordResetToken();
+    const tokenHash = hashOwnerPasswordResetToken(token);
+    const expiresAt = new Date(Date.now() + OWNER_PASSWORD_RESET_TTL_MS);
+    const tokenUpdate = await User.updateOne(
+      { _id: user._id, role: "OWNER", active: true },
+      {
+        $set: {
+          passwordResetTokenHash: tokenHash,
+          passwordResetExpiresAt: expiresAt,
+        },
+      },
+    );
+    if (!tokenUpdate.matchedCount) {
+      throw new ApiError(
+        404,
+        "This email does not match an active owner account. Enter the owner's registered email address.",
+      );
+    }
+
+    try {
+      await sendOwnerPasswordResetEmail({ user, token, mailConfig });
+    } catch (error) {
+      await User.updateOne(
+        { _id: user._id, passwordResetTokenHash: tokenHash },
+        {
+          $set: {
+            passwordResetTokenHash: null,
+            passwordResetExpiresAt: null,
+          },
+        },
+      );
+      console.error("Owner password recovery email delivery failed.", {
+        code: error.code,
+        responseCode: error.responseCode,
+        command: error.command,
+      });
+      throw new ApiError(
+        503,
+        "Recovery email could not be sent. Check SMTP configuration or contact the system administrator.",
+      );
+    }
+
+    res.status(202).json({
+      message:
+        "If an active owner account exists for that email, a recovery link will be sent.",
+    });
+  }),
+);
+
+router.post(
+  "/password-reset/confirm",
+  passwordResetConfirmRateLimit,
+  asyncHandler(async (req, res) => {
+    const token = String(req.body.token || "");
+    const password = String(req.body.password || "");
+    if (!token || token.length > 200) {
+      throw new ApiError(400, "This recovery link is invalid or expired.");
+    }
+    if (password.length < 8 || password.length > 128) {
+      throw new ApiError(400, "Password must be between 8 and 128 characters.");
+    }
+
+    const tokenHash = hashOwnerPasswordResetToken(token);
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const user = await User.findOneAndUpdate(
+      {
+        role: "OWNER",
+        active: true,
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: { $gt: new Date() },
+      },
+      {
+        $set: {
+          password: hashedPassword,
+          passwordResetTokenHash: null,
+          passwordResetExpiresAt: null,
+        },
+      },
+      { new: true },
+    ).select("_id name role");
+
+    if (!user) {
+      throw new ApiError(400, "This recovery link is invalid or expired.");
+    }
+
+    await AdminSession.updateMany(
+      { user: user._id, endedAt: null },
+      { $set: { endedAt: new Date() } },
+    );
+    await recordAdminActivity(
+      { user },
+      "PASSWORD_RESET",
+      `${user.name} reset the owner password using email recovery.`,
+      { method: "EMAIL_RECOVERY" },
+    );
+    res.json({
+      ok: true,
+      message: "Password reset successfully. Sign in with your new password.",
+    });
   }),
 );
 
@@ -328,6 +488,36 @@ router.patch(
       );
     }
     res.json({ user: safeUser(user) });
+  }),
+);
+
+router.delete(
+  "/admins/:id/permanent",
+  requireAuth,
+  allowRoles("OWNER"),
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+    if (!user) throw new ApiError(404, "Admin not found.");
+    if (user.id === req.user.id)
+      throw new ApiError(400, "You cannot permanently delete your own account.");
+    if (user.role === "OWNER")
+      throw new ApiError(400, "Owner accounts cannot be permanently deleted here.");
+
+    await User.findByIdAndDelete(user._id);
+    await AdminSession.deleteMany({ user: user._id });
+    await recordAdminActivity(
+      req,
+      "DELETE",
+      `${req.user.name} permanently deleted admin account for ${user.name}.`,
+      {
+        targetId: user.id,
+        targetName: user.name,
+        targetEmail: user.email,
+        role: user.role,
+        permanent: true,
+      },
+    );
+    res.json({ deletedId: user.id });
   }),
 );
 

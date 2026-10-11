@@ -316,6 +316,7 @@ router.get(
         date: key,
         present: 0,
         doublePresent: 0,
+        triplePresent: 0,
         halfDay: 0,
         absent: 0,
         leave: 0,
@@ -325,6 +326,7 @@ router.get(
       const day = dailyAttendance[key];
       if (item.status === "PRESENT") day.present += 1;
       if (item.status === "DOUBLE_PRESENT") day.doublePresent += 1;
+      if (item.status === "TRIPLE_PRESENT") day.triplePresent += 1;
       if (item.status === "HALF_DAY") day.halfDay += 1;
       if (item.status === "ABSENT") day.absent += 1;
       if (item.status === "LEAVE") day.leave += 1;
@@ -338,7 +340,7 @@ router.get(
         zoneStatsForWorker.payable += Number(item.payableAmount || 0);
         zoneStatsForWorker.overtimeHours += Number(item.overtimeHours || 0);
         if (item.status !== "NOT_MARKED") zoneStatsForWorker.marked += 1;
-        if (["PRESENT", "DOUBLE_PRESENT", "HALF_DAY"].includes(item.status)) {
+        if (["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT", "HALF_DAY"].includes(item.status)) {
           zoneStatsForWorker.present += 1;
         }
         if (item.status === "ABSENT") zoneStatsForWorker.absent += 1;
@@ -350,7 +352,7 @@ router.get(
           companyStatsForWorker.marked += 1;
         }
         if (
-          ["PRESENT", "DOUBLE_PRESENT", "HALF_DAY"].includes(item.status)
+          ["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT", "HALF_DAY"].includes(item.status)
         ) {
           companyStatsForWorker.present += 1;
         }
@@ -360,7 +362,7 @@ router.get(
         if (item.status !== "NOT_MARKED") workerStats.records += 1;
         workerStats.overtimeHours += Number(item.overtimeHours || 0);
         workerStats.payable += Number(item.payableAmount || 0);
-        if (item.status === "PRESENT" || item.status === "DOUBLE_PRESENT")
+        if (["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT"].includes(item.status))
           workerStats.present += 1;
         if (item.status === "ABSENT") workerStats.absent += 1;
         if (item.status === "LEAVE") workerStats.leave += 1;
@@ -452,7 +454,7 @@ router.get(
     }
     const expected = workers.length * days;
     const present = attendance.filter((item) =>
-      ["PRESENT", "DOUBLE_PRESENT", "HALF_DAY"].includes(item.status),
+      ["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT", "HALF_DAY"].includes(item.status),
     ).length;
     const payable = attendance.reduce(
       (total, item) => total + Number(item.payableAmount || 0),

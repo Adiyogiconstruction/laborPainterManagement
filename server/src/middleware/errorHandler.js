@@ -26,6 +26,11 @@ export function errorHandler(error, _req, res, _next) {
     return res.status(400).json({ message: "Invalid record identifier." });
   const status = error.status || 500;
   return res.status(status).json({
-    message: status < 500 ? error.message : "Something went wrong.",
+    message:
+      error.exposeMessage && error.message
+        ? error.message
+        : status < 500
+          ? error.message
+          : "Something went wrong.",
   });
 }

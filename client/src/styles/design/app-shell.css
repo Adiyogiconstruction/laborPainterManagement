@@ -8,8 +8,8 @@
   top: 0;
   bottom: 0;
   width: 255px;
-  background: #2f1b0b;
-  color: #e4f1ef;
+  background: #000;
+  color: #fff;
   padding: 23px 13px 16px;
   display: flex;
   flex-direction: column;
@@ -45,7 +45,7 @@
 .sidebar-brand span,
 .profile span {
   display: block;
-  color: #e4c5a8;
+  color: #fff;
   font-size: 11px;
   margin-top: 2px;
 }
@@ -65,7 +65,7 @@
 }
 .nav-group-label {
   padding: 0 12px 5px;
-  color: #c69b76;
+  color: #fff;
   font-family: "DM Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.12em;
@@ -76,32 +76,37 @@
   align-items: center;
   gap: 12px;
   text-decoration: none;
-  color: #f1d7bd;
+  color: #fff;
   border-radius: 9px;
   padding: 11px 12px;
   font-size: 13px;
   font-weight: 600;
 }
+.sidebar nav a svg {
+  color: #ff9833;
+}
 .sidebar nav a:hover {
-  background: #593316;
+  background: #1b1b1b;
   color: #fff;
 }
 .sidebar nav a.nav-primary {
   padding: 14px 13px;
-  background: #ff7f00;
-  color: #2b1600;
+  background: #000;
+  color: #fff;
   font-size: 14px;
   box-shadow: 0 7px 18px rgba(0, 0, 0, 0.16);
 }
 .sidebar nav a.nav-primary:hover,
 .sidebar nav a.nav-primary.active {
-  background: #ff9833;
-  color: #2b1600;
+  background: #1b1b1b;
+  color: #fff;
 }
 .sidebar nav a.active {
-  background: #fff0df;
-  color: #713900;
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.14);
+  background: #1b1b1b;
+  color: #fff;
+  box-shadow: none;
+  outline: 1px solid #ff9833;
+  outline-offset: -1px;
 }
 .sidebar nav a.admin-nav-link.active {
   padding-top: 8px;
@@ -150,7 +155,7 @@
   background: rgba(20, 59, 55, 0.09);
 }
 .profile .icon-button {
-  color: #b9d1ce;
+  color: #ff9833;
 }
 .app-main {
   margin-left: 255px;

@@ -10,6 +10,7 @@ import {
   CircleDollarSign,
   ChevronDown,
   ChevronUp,
+  Download,
   FilePlus2,
   History,
   IndianRupee,
@@ -119,6 +120,8 @@ export function ReportsPage() {
   const [reportTab, setReportTab] = useState("ATTENDANCE");
   const [analyticsData, setAnalyticsData] = useState();
   const [workerOptions, setWorkerOptions] = useState([]);
+  const [companyProfile, setCompanyProfile] = useState(null);
+  const [companyProfileLoading, setCompanyProfileLoading] = useState(true);
   const [companyFilter, setCompanyFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [workZoneFilter, setWorkZoneFilter] = useState("");
@@ -154,6 +157,22 @@ export function ReportsPage() {
     setPages((current) => ({ ...current, attendance: 1 }));
     setAttendancePrintMode(true);
     window.setTimeout(() => window.print(), 0);
+  };
+  const downloadTransactionStatement = async () => {
+    if (!companyProfile?.companyName || !data?.payments) return;
+    try {
+      const { downloadTransactionStatementPdf } = await import(
+        "../utils/transactionStatementPdf.js"
+      );
+      downloadTransactionStatementPdf({
+        profile: companyProfile,
+        from,
+        to,
+        payments: data.payments,
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
   const load = () => {
     const sequence = ++loadSequence.current;
@@ -263,6 +282,12 @@ export function ReportsPage() {
       .then(({ workers: result }) => setWorkerOptions(result || []))
       .catch((err) => setError(errorMessage(err)));
   }, [type]);
+  useEffect(() => {
+    request(api.get("/company-profile"))
+      .then(({ profile }) => setCompanyProfile(profile))
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setCompanyProfileLoading(false));
+  }, []);
   const rowsForPage = (key, rows = []) => {
     const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
     const page = Math.min(pages[key] || 1, pageCount);
@@ -282,6 +307,7 @@ export function ReportsPage() {
     attendanceData?.workerSummaries || [],
   );
   const payrollPage = rowsForPage("payroll", data?.payments || []);
+  const transactionPage = rowsForPage("transactions", data?.payments || []);
   const exceptionPage = rowsForPage(
     "exceptions",
     analyticsData?.exceptions || [],
@@ -294,6 +320,14 @@ export function ReportsPage() {
     "management",
     analyticsData?.managementWorkers || [],
   );
+  const reportTabLabels = {
+    ATTENDANCE: "Attendance",
+    PAYROLL: "Payroll",
+    STATEMENT: "Transaction statement",
+    WORKFORCE: "Workforce",
+    EXCEPTIONS: "Exceptions",
+    MANAGEMENT: "Management",
+  };
   const workforceDimensions = ["company", "team", "workZone", "skill"].map(
     (dimension) => {
       const entries = Object.entries(
@@ -307,8 +341,29 @@ export function ReportsPage() {
     },
   );
   return (
-    <div className={attendancePrintMode ? "attendance-print-root" : undefined}>
+    <div
+      className={`reports-print-root${attendancePrintMode ? " attendance-print-root" : ""}`}
+    >
+      <header className="report-print-heading">
+        <p>LABOUR OPERATIONS REPORT</p>
+        <h1>{companyProfile?.companyName || "Company name unavailable"}</h1>
+        <div>
+          <span>
+            <strong>Report</strong> {reportTabLabels[reportTab]}
+          </span>
+          {companyFilter && (
+            <span>
+              <strong>Client</strong> {companyFilter}
+            </span>
+          )}
+          <span>
+            <strong>Period</strong> {date(`${from}T00:00:00`)} –{" "}
+            {date(`${to}T00:00:00`)}
+          </span>
+        </div>
+      </header>
       <PageHeader
+        className="reports-page-header"
         eyebrow="ANALYTICS & RECORDS"
         title="Labour operations report"
         detail="Filter labour work and payment movement by period."
@@ -317,12 +372,14 @@ export function ReportsPage() {
             icon={Printer}
             className={`${styles["button-secondary"]}`}
             onClick={() => window.print()}
+            disabled={companyProfileLoading || !companyProfile?.companyName}
           >
             Print / save PDF
           </Button>
         }
       />
       <Panel
+        className="report-filter-panel"
         title="Report filters"
         detail="Reports refresh automatically when filters change. Select both dates and use Apply filters to refresh manually."
       >
@@ -423,13 +480,14 @@ export function ReportsPage() {
         <ErrorNote error={error} />
       </Panel>
       <div
-        className={`${styles["report-tabs"]}`}
+        className={`${styles["report-tabs"]} report-section-tabs`}
         role="tablist"
         aria-label="Report sections"
       >
         {[
           ["ATTENDANCE", "Attendance"],
           ["PAYROLL", "Payroll"],
+          ["STATEMENT", "Transaction statement"],
           ["WORKFORCE", "Workforce"],
           ["EXCEPTIONS", "Exceptions"],
           ["MANAGEMENT", "Management"],
@@ -457,7 +515,11 @@ export function ReportsPage() {
                 icon={Printer}
                 className={`${styles["button-secondary"]}`}
                 onClick={printAttendanceReport}
-                disabled={!attendanceData?.workerSummaries?.length}
+                disabled={
+                  companyProfileLoading ||
+                  !companyProfile?.companyName ||
+                  !attendanceData?.workerSummaries?.length
+                }
               >
                 Attendance PDF
               </Button>
@@ -492,6 +554,7 @@ export function ReportsPage() {
                   <th>Worker</th>
                   <th>Present</th>
                   <th>2P</th>
+                  <th>3P</th>
                   <th>Absent</th>
                   <th>Half day</th>
                   <th>Leave</th>
@@ -518,6 +581,7 @@ export function ReportsPage() {
                         </td>
                         <td>{worker.PRESENT}</td>
                         <td>{worker.DOUBLE_PRESENT}</td>
+                        <td>{worker.TRIPLE_PRESENT}</td>
                         <td>{worker.ABSENT}</td>
                         <td>{worker.HALF_DAY}</td>
                         <td>{worker.LEAVE}</td>
@@ -597,6 +661,91 @@ export function ReportsPage() {
                   <tr>
                     <td colSpan="9">
                       <Empty title="No active labour for this filter" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      {reportTab === "STATEMENT" && (
+        <Panel
+          title="Account statement"
+          detail={`All matching transactions · ${date(`${from}T00:00:00`)} – ${date(`${to}T00:00:00`)}`}
+          action={
+            <Button
+              icon={Download}
+              className={styles["button-primary"]}
+              onClick={downloadTransactionStatement}
+              disabled={
+                loading ||
+                companyProfileLoading ||
+                !companyProfile?.companyName ||
+                !data?.payments
+              }
+            >
+              Download statement PDF
+            </Button>
+          }
+        >
+          <div className={styles["report-summary-grid"]}>
+            {[
+              ["Total debit · Paid out", money(data?.summary?.outflow || 0)],
+              ["Total credit · Received", money(data?.summary?.inflow || 0)],
+              [
+                "Net balance · Period movement",
+                `${money(Math.abs(Number(data?.summary?.outflow || 0) - Number(data?.summary?.inflow || 0)))} ${Number(data?.summary?.outflow || 0) >= Number(data?.summary?.inflow || 0) ? "Dr" : "Cr"}`,
+              ],
+              ["No. of entries", number(data?.payments?.length || 0)],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+          <ReportPagination
+            total={data?.payments?.length || 0}
+            page={transactionPage.page}
+            pageSize={pageSize}
+            onPageChange={(page) => changePage("transactions", page)}
+            onPageSizeChange={changePageSize}
+          />
+          <div className={styles["table-wrap"]}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Name</th>
+                  <th>Details</th>
+                  <th>Debit (-)</th>
+                  <th>Credit (+)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactionPage.rows.map((payment) => (
+                  <tr key={payment._id}>
+                    <td>{date(payment.paidOn)}</td>
+                    <td>{payment.worker?.name || "Business expense"}</td>
+                    <td>
+                      {payment.kind.replaceAll("_", " ")}
+                      {payment.method ? ` · ${payment.method}` : ""}
+                      {payment.reference ? ` · ${payment.reference}` : ""}
+                      {payment.notes ? ` · ${payment.notes}` : ""}
+                    </td>
+                    <td className={payment.flow === "OUTFLOW" ? styles["expense"] : undefined}>
+                      {payment.flow === "OUTFLOW" ? money(payment.amount) : "—"}
+                    </td>
+                    <td className={payment.flow === "INFLOW" ? styles["income"] : undefined}>
+                      {payment.flow === "INFLOW" ? money(payment.amount) : "—"}
+                    </td>
+                  </tr>
+                ))}
+                {!data?.payments?.length && (
+                  <tr>
+                    <td colSpan="5">
+                      <Empty title="No transactions for this filter" />
                     </td>
                   </tr>
                 )}

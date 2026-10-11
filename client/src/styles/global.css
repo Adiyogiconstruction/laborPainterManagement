@@ -69,14 +69,64 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(255, 127, 0, 0.16);
 }
 
+.report-print-heading {
+  display: none;
+}
+
 @media print {
   @page {
     size: auto;
     margin: 8mm;
   }
 
-  .attendance-print-root > :not(.attendance-report-panel) {
+  .report-print-heading {
+    display: block !important;
+    margin: 0 0 12px;
+    padding: 0 0 10px;
+    border-bottom: 2px solid #23443c;
+    color: #203b35;
+    font-family: Arial, sans-serif;
+  }
+
+  .report-print-heading > p {
+    margin: 0 0 4px;
+    color: #16856b;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+  }
+
+  .report-print-heading h1 {
+    margin: 0 0 9px;
+    font-size: 18pt;
+    line-height: 1.2;
+  }
+
+  .report-print-heading > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 22px;
+    color: #52645f;
+    font-size: 9pt;
+  }
+
+  .report-print-heading strong {
+    margin-right: 4px;
+    color: #203b35;
+  }
+
+  .reports-print-root > .reports-page-header,
+  .reports-print-root > .report-filter-panel,
+  .reports-print-root > .report-section-tabs {
     display: none !important;
+  }
+
+  .attendance-print-root > :not(.attendance-report-panel):not(.report-print-heading) {
+    display: none !important;
+  }
+
+  .attendance-print-root .report-print-heading {
+    display: block !important;
   }
 
   .attendance-print-root .attendance-report-panel {

@@ -1,13 +1,22 @@
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { ArrowLeft, KeyRound, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import api, { request } from "../services/apiClient.js";
 import { Button, LoadingPage } from "../components/ui/index.jsx";
 import styles from "../styles/design.module.css";
 import companyLogo from "../assets/image.png";
 
 export function LoginPage({ onAuthenticated }) {
+  const navigate = useNavigate();
   const [needsSetup, setNeedsSetup] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [recoveryMode, setRecoveryMode] = useState("login");
+  const [resetToken, setResetToken] = useState(
+    () =>
+      new URLSearchParams(window.location.hash.slice(1)).get("resetToken") || "",
+  );
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [success, setSuccess] = useState("");
   const [captcha, setCaptcha] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,6 +58,79 @@ export function LoginPage({ onAuthenticated }) {
       setLoading(false);
     }
   };
+  const requestPasswordRecovery = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setLoading(true);
+    try {
+      const result = await request(
+        api.post("/auth/password-reset/request", {
+          email: form.email,
+          captchaCode: form.captchaCode,
+          captchaToken: captcha.token,
+        }),
+      );
+      setSuccess(result.message);
+      setRecoveryMode("sent");
+    } catch (err) {
+      setError(err.message);
+      refreshCaptcha();
+    } finally {
+      setLoading(false);
+    }
+  };
+  const resetPassword = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    if (form.password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await request(
+        api.post("/auth/password-reset/confirm", {
+          token: resetToken,
+          password: form.password,
+        }),
+      );
+      setSuccess(result.message);
+      setResetToken("");
+      setRecoveryMode("login");
+      setConfirmPassword("");
+      setForm((current) => ({ ...current, password: "" }));
+      navigate(`${window.location.pathname}${window.location.search}`, {
+        replace: true,
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const openRecovery = () => {
+    setRecoveryMode("request");
+    setError("");
+    setSuccess("");
+    refreshCaptcha();
+  };
+  const returnToLogin = () => {
+    setRecoveryMode("login");
+    setError("");
+    setSuccess("");
+    setForm((current) => ({ ...current, password: "", captchaCode: "" }));
+    refreshCaptcha();
+  };
+  const leavePasswordReset = () => {
+    setResetToken("");
+    setRecoveryMode("login");
+    setError("");
+    navigate(`${window.location.pathname}${window.location.search}`, {
+      replace: true,
+    });
+  };
   if (needsSetup === null) return <LoadingPage />;
   return (
     <main className={`${styles["login-screen"]}`}>
@@ -58,42 +140,125 @@ export function LoginPage({ onAuthenticated }) {
           src={companyLogo}
           alt="Adiyogi Construction"
         />
-        <p className={`${styles["eyebrow"]}`}>ADIYOGI CONSTRUCTION</p>
-        <h1>
-          Clear numbers.
-          <br />
-          <em>Calmer days.</em>
+        <h1 className={`${styles["login-company-name"]}`}>
+          Adiyogi Construction
         </h1>
-        <p>
-          One secure workspace for workforce, attendance and payment decisions.
+        <p className={`${styles["login-company-tagline"]}`}>
+          Reliable workforce. Stronger construction.
         </p>
-        <div className={`${styles["login-points"]}`}>
-          <span>✓ Labour records</span>
-          <span>✓ Advance and due tracking</span>
-          <span>✓ Bills ready to print or save as PDF</span>
-        </div>
       </section>
       <section className={`${styles["login-card"]}`}>
-        <img
-          className={`${styles["brand-mobile"]}`}
-          src={companyLogo}
-          alt="Adiyogi Construction"
-        />
+        <div className={`${styles["login-mobile-brand"]}`}>
+          <img
+            className={`${styles["brand-mobile"]}`}
+            src={companyLogo}
+            alt="Adiyogi Construction"
+          />
+          <strong className={`${styles["brand-mobile-name"]}`}>
+            Adiyogi Construction
+          </strong>
+          <span className={`${styles["brand-mobile-tagline"]}`}>
+            Reliable workforce. Stronger construction.
+          </span>
+        </div>
         <p className={`${styles["eyebrow"]}`}>
-          {needsSetup ? "FIRST-TIME SETUP" : "WELCOME BACK"}
+          {resetToken
+            ? "PASSWORD RECOVERY"
+            : recoveryMode === "request" || recoveryMode === "sent"
+              ? "OWNER ACCOUNT RECOVERY"
+              : needsSetup
+                ? "FIRST-TIME SETUP"
+                : "WELCOME BACK"}
         </p>
         <h2>
-          {needsSetup
-            ? "Create the owner account"
-            : "Sign in to your workspace"}
+          {resetToken
+            ? "Choose a new password"
+            : recoveryMode === "request"
+              ? "Reset owner password"
+              : recoveryMode === "sent"
+                ? "Check your email"
+                : needsSetup
+                  ? "Create the owner account"
+                  : "Sign in to your workspace"}
         </h2>
         <p>
-          {needsSetup
-            ? "This owner can later add admins and control access."
-            : "Use your administrator credentials to continue."}
+          {resetToken
+            ? "Choose a new password for your owner account. The recovery link can only be used once."
+            : recoveryMode === "request"
+              ? "Enter the registered owner email. We’ll verify it before sending a one-time recovery link."
+              : recoveryMode === "sent"
+                ? "If an active owner account exists for that email, a recovery link will arrive shortly."
+                : needsSetup
+                  ? "This owner can later add admins and control access."
+                  : "Use your administrator credentials to continue."}
         </p>
-        <form onSubmit={submit} className={`${styles["form-stack"]}`}>
-          {needsSetup && (
+        {resetToken ? (
+          <form onSubmit={resetPassword} className={`${styles["form-stack"]}`}>
+            <label className={`${styles["field"]}`}>
+              <span>New password</span>
+              <input
+                required
+                minLength="8"
+                maxLength="128"
+                type="password"
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(e) =>
+                  setForm({ ...form, password: e.target.value })
+                }
+                placeholder="8–128 characters"
+              />
+            </label>
+            <label className={`${styles["field"]}`}>
+              <span>Confirm new password</span>
+              <input
+                required
+                minLength="8"
+                maxLength="128"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Enter the new password again"
+              />
+            </label>
+            {error && <p className={`${styles["form-error"]}`}>{error}</p>}
+            {success && <p className={`${styles["form-success"]}`}>{success}</p>}
+            <Button
+              type="submit"
+              className={`${styles["button-primary"]} ${styles["button-block"]}`}
+              loading={loading}
+            >
+              Set new password
+            </Button>
+            <Button
+              type="button"
+              icon={ArrowLeft}
+              className={`${styles["button-secondary"]} ${styles["button-block"]}`}
+              onClick={leavePasswordReset}
+              disabled={loading}
+            >
+              Back to sign in
+            </Button>
+          </form>
+        ) : recoveryMode === "sent" ? (
+          <div className={`${styles["form-stack"]}`}>
+            {success && <p className={`${styles["form-success"]}`}>{success}</p>}
+            <Button
+              type="button"
+              icon={ArrowLeft}
+              className={`${styles["button-secondary"]} ${styles["button-block"]}`}
+              onClick={returnToLogin}
+            >
+              Back to sign in
+            </Button>
+          </div>
+        ) : (
+        <form
+          onSubmit={recoveryMode === "request" ? requestPasswordRecovery : submit}
+          className={`${styles["form-stack"]}`}
+        >
+          {needsSetup && recoveryMode === "login" && (
             <label className={`${styles["field"]}`}>
               <span>Your name</span>
               <input
@@ -116,17 +281,22 @@ export function LoginPage({ onAuthenticated }) {
               placeholder="you@company.com"
             />
           </label>
-          <label className={`${styles["field"]}`}>
-            <span>Password</span>
-            <input
-              required
-              minLength="8"
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              placeholder="Minimum 8 characters"
-            />
-          </label>
+          {recoveryMode === "login" && (
+            <label className={`${styles["field"]}`}>
+              <span>Password</span>
+              <input
+                required
+                minLength="8"
+                type="password"
+                autoComplete="current-password"
+                value={form.password}
+                onChange={(e) =>
+                  setForm({ ...form, password: e.target.value })
+                }
+                placeholder="Minimum 8 characters"
+              />
+            </label>
+          )}
           <label className={`${styles["field"]}`}>
             <span>Verification code</span>
             <div className={`${styles["captcha-challenge"]}`}>
@@ -165,15 +335,40 @@ export function LoginPage({ onAuthenticated }) {
             />
           </label>
           {error && <p className={`${styles["form-error"]}`}>{error}</p>}
+          {success && <p className={`${styles["form-success"]}`}>{success}</p>}
           <Button
             type="submit"
             className={`${styles["button-primary"]} ${styles["button-block"]}`}
             loading={loading}
             disabled={loading || !captcha}
           >
-            {needsSetup ? "Create secure workspace" : "Sign in"}
+            {recoveryMode === "request"
+              ? "Send recovery link"
+              : needsSetup
+                ? "Create secure workspace"
+                : "Sign in"}
           </Button>
+          {!needsSetup && (
+            <Button
+              type="button"
+              icon={
+                recoveryMode === "request" ? ArrowLeft : KeyRound
+              }
+              className={
+                recoveryMode === "request"
+                  ? `${styles["button-secondary"]} ${styles["button-block"]}`
+                  : styles["login-recovery-link"]
+              }
+              onClick={
+                recoveryMode === "request" ? returnToLogin : openRecovery
+              }
+              disabled={loading}
+            >
+              {recoveryMode === "request" ? "Back to sign in" : "Forgot password?"}
+            </Button>
+          )}
         </form>
+        )}
       </section>
     </main>
   );

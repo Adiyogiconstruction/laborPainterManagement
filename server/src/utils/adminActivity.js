@@ -13,6 +13,12 @@ export function summarizeAdminActivity(events = []) {
   return {
     lastLoginAt: lastLogin?.createdAt || null,
     lastLogoutAt: lastLogout?.createdAt || null,
+    activities: sorted.map((event) => ({
+      action: event.action,
+      message: event.message,
+      createdAt: event.createdAt,
+      meta: event.meta || {},
+    })),
     recentChanges: sorted
       .filter((event) =>
         [
@@ -24,7 +30,6 @@ export function summarizeAdminActivity(events = []) {
           "ROLE_CHANGE",
         ].includes(event.action),
       )
-      .slice(0, 10)
       .map((event) => ({
         action: event.action,
         message: event.message,

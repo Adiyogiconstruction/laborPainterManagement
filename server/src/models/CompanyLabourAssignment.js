@@ -9,9 +9,10 @@ const companyLabourAssignmentSchema = new mongoose.Schema(
       index: true,
     },
     companyName: { type: String, required: true, trim: true },
+    zone: { type: String, trim: true, maxlength: 100, default: "" },
     labourCount: { type: Number, required: true, min: 1 },
     startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
+    endDate: { type: Date, default: null },
     companyLabourRate: { type: Number, required: true, min: 0 },
     originalLabourRate: { type: Number, required: true, min: 0 },
     createdBy: {

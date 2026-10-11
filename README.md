@@ -31,7 +31,7 @@ The amount can also be overridden for job, square-foot or lump-sum work. Payment
 
 ## Run locally
 
-1. Copy `server/.env.example` to the server environment and set `PORT`, `MONGODB_URI`, a long random `JWT_SECRET`, the deployed frontend URL in `CLIENT_ORIGIN`, and all three Cloudinary credentials. Never commit either `.env` file.
+1. Copy `server/.env.example` to the server environment and set `PORT`, `MONGODB_URI`, a long random `JWT_SECRET`, the deployed frontend URL in `CLIENT_ORIGIN`, all three Cloudinary credentials, and SMTP settings. SMTP must be configured to deliver owner password recovery links. Never commit either `.env` file.
 2. Copy `client/.env.example` to the frontend build environment and set `VITE_API_URL` to the deployed backend URL ending in `/api`.
 3. Install packages:
 
@@ -46,6 +46,10 @@ The amount can also be overridden for job, square-foot or lump-sum work. Payment
    ```
 
 5. Open `http://localhost:5173`. The first screen creates the initial Owner account; subsequent users sign in normally.
+
+### Owner password recovery
+
+The sign-in screen provides an owner-only email recovery flow. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` in the server environment, and set `CLIENT_ORIGIN` to the frontend URL. SMTP credentials must be provided by the workspace operator; recovery requests report a configuration/delivery error if email cannot be sent. Reset links are single-use and expire after 30 minutes. Successfully resetting the owner password ends all active sessions.
 
 The production frontend check is available with:
 

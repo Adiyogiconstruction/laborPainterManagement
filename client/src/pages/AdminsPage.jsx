@@ -10,6 +10,7 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  FileDown,
   FilePlus2,
   History,
   IndianRupee,
@@ -19,6 +20,7 @@ import {
   Printer,
   ReceiptText,
   RefreshCcw,
+  Trash2,
   UserRoundPlus,
   UsersRound,
 } from "lucide-react";
@@ -27,6 +29,7 @@ import { date, inputDate, money, number } from "../utils/formatters.js";
 import {
   AddButton,
   Button,
+  DeleteConfirm,
   Empty,
   Field,
   Modal,
@@ -319,6 +322,7 @@ export function AdminsPage() {
   const [activityPages, setActivityPages] = useState({});
   const [adding, setAdding] = useState(false);
   const [resetting, setResetting] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const [error, setError] = useState("");
   const [usageLoading, setUsageLoading] = useState(false);
   const [companyProfile, setCompanyProfile] = useState();
@@ -388,6 +392,21 @@ export function AdminsPage() {
   const changeActivityPage = (userId, nextPage) => {
     setActivityPages((current) => ({ ...current, [userId]: nextPage }));
   };
+  const downloadActivity = async (user) => {
+    setError("");
+    try {
+      const { downloadAdminActivityPdf } = await import(
+        "../utils/adminActivityPdf.js"
+      );
+      downloadAdminActivityPdf({
+        user,
+        profile: companyProfile,
+        activities: user.activities || [],
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
   const changeActive = async (user) => {
     try {
       const { user: changed } = await request(
@@ -399,6 +418,15 @@ export function AdminsPage() {
     } catch (err) {
       setError(errorMessage(err));
     }
+  };
+  const deleteAdmin = async () => {
+    const { deletedId } = await request(
+      api.delete(`/auth/admins/${deleting.id}/permanent`),
+    );
+    setUsers((current) => current.filter((item) => item.id !== deletedId));
+    setUsageRows((current) => current.filter((item) => item.id !== deletedId));
+    if (usageAdmin === deletedId) setUsageAdmin("");
+    setDeleting(null);
   };
   return (
     <>
@@ -415,7 +443,7 @@ export function AdminsPage() {
       />
       <Panel
         title="Workspace team"
-        detail="Owners can create accounts and switch an account off whenever needed."
+        detail="Owners can create, disable, or permanently remove non-owner accounts."
       >
         <ErrorNote error={error} />
         <div className={`${styles["table-wrap"]}`}>
@@ -467,6 +495,15 @@ export function AdminsPage() {
                           onClick={() => changeActive(user)}
                         >
                           {user.active ? "Disable" : "Enable"}
+                        </Button>
+                        <Button
+                          type="button"
+                          className={`${styles["button-danger"]}`}
+                          onClick={() => setDeleting(user)}
+                          aria-label={`Permanently delete ${user.name}`}
+                          title="Delete permanently"
+                        >
+                          <Trash2 size={15} />
                         </Button>
                       </div>
                     )}
@@ -583,7 +620,7 @@ export function AdminsPage() {
       </Panel>
       <Panel
         title="Access activity"
-        detail="Owner-only record of login times, logout times and recent admin actions."
+        detail="Owner-only record of login times, logout times and all recorded admin actions."
         action={
           <Button
             type="button"
@@ -601,7 +638,8 @@ export function AdminsPage() {
                 <th>Administrator</th>
                 <th>Last login</th>
                 <th>Last logout</th>
-                <th>Recent changes</th>
+                <th>All changes</th>
+                <th>Full activity</th>
               </tr>
             </thead>
             <tbody>
@@ -661,6 +699,15 @@ export function AdminsPage() {
                       </span>
                     )}
                   </td>
+                  <td>
+                    <Button
+                      type="button"
+                      className={`${styles["button-secondary"]}`}
+                      onClick={() => downloadActivity(user)}
+                    >
+                      <FileDown size={15} /> Download PDF
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -688,6 +735,13 @@ export function AdminsPage() {
           user={resetting}
           onClose={() => setResetting(null)}
           onSaved={() => setResetting(null)}
+        />
+      )}
+      {deleting && (
+        <DeleteConfirm
+          itemLabel={`administrator ${deleting.name} (${deleting.email}) and their login sessions`}
+          onClose={() => setDeleting(null)}
+          onConfirm={deleteAdmin}
         />
       )}
     </>

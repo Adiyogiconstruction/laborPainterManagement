@@ -10,9 +10,15 @@ const isValidSession = (session) =>
 
 export default function App() {
   const [session, setSession] = useState(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(
+    !new URLSearchParams(window.location.hash.slice(1)).has("resetToken"),
+  );
   const navigate = useNavigate();
   useEffect(() => {
+    if (new URLSearchParams(window.location.hash.slice(1)).has("resetToken")) {
+      setChecking(false);
+      return;
+    }
     request(api.get("/auth/me"))
       .then(({ user }) => {
         const nextSession = { user };

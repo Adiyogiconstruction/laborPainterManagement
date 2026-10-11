@@ -64,6 +64,11 @@ const monthBounds = (month) => {
   };
 };
 
+const currentMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
 const imageUrl = (worker, urlField, legacyPathField) => {
   const value = worker[urlField] || worker[legacyPathField];
   return value?.startsWith("http") ? value : `${apiOrigin}${value || ""}`;
@@ -348,6 +353,10 @@ function WorkerForm({ initial, onClose, onSaved }) {
       .then((result) => setCompanies(result.companies))
       .catch((err) => setCompanyLoadError(errorMessage(err)));
   }, []);
+  const selectedCompany = companies.find(
+    (company) => company.name === form.companyName,
+  );
+  const companyZones = selectedCompany?.zones || [];
   const update = (field) => (event) =>
     setForm({ ...form, [field]: event.target.value });
   const save = async (event) => {
@@ -355,8 +364,8 @@ function WorkerForm({ initial, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      if (!initial && (!aadhaarFrontFile || !aadhaarBackFile)) {
-        throw new Error("Please select both Aadhaar front and back images.");
+      if (!String(form.name || "").trim() || !String(form.workZone || "").trim()) {
+        throw new Error("Name and work zone are required.");
       }
       const { photoPath, photoUrl, ...workerFields } = form;
       const body = {
@@ -409,7 +418,7 @@ function WorkerForm({ initial, onClose, onSaved }) {
         className={`${styles["form-grid"]} ${styles["three-col"]}`}
         onSubmit={save}
       >
-        <Field label="Full name">
+        <Field label="Full name" hint="Required">
           <input
             required
             autoFocus
@@ -421,7 +430,20 @@ function WorkerForm({ initial, onClose, onSaved }) {
         <Field label="Company / client" hint="Optional">
           <select
             value={form.companyName || ""}
-            onChange={update("companyName")}
+            onChange={(event) => {
+              const companyName = event.target.value;
+              const nextCompany = companies.find(
+                (company) => company.name === companyName,
+              );
+              setForm((current) => ({
+                ...current,
+                companyName,
+                workZone:
+                  nextCompany?.zones?.includes(current.workZone)
+                    ? current.workZone
+                    : "",
+              }));
+            }}
           >
             <option value="">No company selected</option>
             {form.companyName &&
@@ -432,7 +454,7 @@ function WorkerForm({ initial, onClose, onSaved }) {
               )}
             {companies.map((company) => (
               <option key={company._id} value={company.name}>
-                {company.name}{company.location ? ` · ${company.location}` : ""}
+                {company.name}
               </option>
             ))}
           </select>
@@ -451,17 +473,15 @@ function WorkerForm({ initial, onClose, onSaved }) {
             placeholder="e.g. Team A or Ramesh crew"
           />
         </Field>
-        <Field label="Mobile number" hint="Required">
+        <Field label="Mobile number">
           <input
-            required
             value={form.phone || ""}
             onChange={update("phone")}
             placeholder="Mobile number"
           />
         </Field>
-        <Field label="Aadhaar number" hint="Required">
+        <Field label="Aadhaar number">
           <input
-            required
             inputMode="numeric"
             pattern="[0-9]{12}"
             maxLength="12"
@@ -470,26 +490,55 @@ function WorkerForm({ initial, onClose, onSaved }) {
             placeholder="12-digit Aadhaar number"
           />
         </Field>
-        <Field label="Skill / role" hint="Required">
+        <Field label="Skill / role">
           <input
-            required
             value={form.skill || ""}
             onChange={update("skill")}
             placeholder="e.g. Mason helper"
           />
         </Field>
-        <Field label="Current work zone">
-          <input
-            list="worker-zones"
-            value={form.workZone || ""}
-            onChange={update("workZone")}
-            placeholder="Mumbai Zone or another location"
-          />
-          <datalist id="worker-zones">
-            <option value="Mumbai Zone" />
-            <option value="Chennai Zone" />
-            <option value="Other" />
-          </datalist>
+        <Field
+          label={form.companyName ? "Company work zone" : "Current work zone"}
+          hint={
+            form.companyName && companyZones.length
+              ? "Choose from this company’s configured zones."
+              : "Required"
+          }
+        >
+          {companyZones.length ? (
+            <select
+              required
+              value={form.workZone || ""}
+              onChange={update("workZone")}
+            >
+              <option value="">Select company zone</option>
+              {form.workZone && !companyZones.includes(form.workZone) && (
+                <option value={form.workZone}>
+                  {form.workZone} (existing)
+                </option>
+              )}
+              {companyZones.map((zone) => (
+                <option value={zone} key={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <input
+                required
+                list="worker-zones"
+                value={form.workZone || ""}
+                onChange={update("workZone")}
+                placeholder="Select a company to choose its zone"
+              />
+              <datalist id="worker-zones">
+                <option value="Mumbai Zone" />
+                <option value="Chennai Zone" />
+                <option value="Other" />
+              </datalist>
+            </>
+          )}
         </Field>
         <Field label="Worker photo">
           <input
@@ -501,12 +550,11 @@ function WorkerForm({ initial, onClose, onSaved }) {
             <small>Existing photo will remain unless replaced.</small>
           )}
         </Field>
-        <Field label="Aadhaar card - front" hint="Required for new workers">
+        <Field label="Aadhaar card - front">
           <input
             type="file"
             accept="image/*"
             capture="environment"
-            required={!initial && !form.aadhaarFrontPath}
             onChange={(event) =>
               setAadhaarFrontFile(event.target.files?.[0] || null)
             }
@@ -515,12 +563,11 @@ function WorkerForm({ initial, onClose, onSaved }) {
             <small>Existing front image will remain unless replaced.</small>
           )}
         </Field>
-        <Field label="Aadhaar card - back" hint="Required for new workers">
+        <Field label="Aadhaar card - back">
           <input
             type="file"
             accept="image/*"
             capture="environment"
-            required={!initial && !form.aadhaarBackPath}
             onChange={(event) =>
               setAadhaarBackFile(event.target.files?.[0] || null)
             }
@@ -536,9 +583,8 @@ function WorkerForm({ initial, onClose, onSaved }) {
             onChange={update("ppeKitIssuedOn")}
           />
         </Field>
-        <Field label="Default daily rate" hint="Required">
+        <Field label="Default daily rate">
           <input
-            required
             min="0"
             type="text"
             inputMode="decimal"
@@ -563,9 +609,8 @@ function WorkerForm({ initial, onClose, onSaved }) {
             placeholder="₹ per OT hour"
           />
         </Field>
-        <Field label="Joining date" hint="Required">
+        <Field label="Joining date">
           <input
-            required
             type="date"
             value={inputDate(form.joiningDate || new Date())}
             onChange={update("joiningDate")}
@@ -582,9 +627,8 @@ function WorkerForm({ initial, onClose, onSaved }) {
             <option value="false">Inactive</option>
           </select>
         </Field>
-        <Field label="Address" hint="Required">
+        <Field label="Address">
           <input
-            required
             value={form.address || ""}
             onChange={update("address")}
             placeholder="Full address"
@@ -628,10 +672,10 @@ function WorkerHistory({ worker, onClose }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [registrationGenerating, setRegistrationGenerating] = useState(false);
   const [month, setMonth] = useState(() =>
-    new Date().toISOString().slice(0, 7),
+    currentMonth(),
   );
   const [period, setPeriod] = useState(() =>
-    monthBounds(new Date().toISOString().slice(0, 7)),
+    monthBounds(currentMonth()),
   );
   const [allTime, setAllTime] = useState(false);
   const [attendancePage, setAttendancePage] = useState(1);
@@ -877,6 +921,11 @@ function WorkerHistory({ worker, onClose }) {
                 <Metric
                   label="Double-work days"
                   value={data.attendanceSummary?.doubleDays || 0}
+                  tone="purple"
+                />
+                <Metric
+                  label="Triple-work days"
+                  value={data.attendanceSummary?.tripleDays || 0}
                   tone="purple"
                 />
                 <Metric

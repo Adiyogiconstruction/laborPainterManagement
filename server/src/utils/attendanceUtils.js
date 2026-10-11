@@ -2,6 +2,7 @@ export const ATTENDANCE_STATUS = {
   NOT_MARKED: { label: "Not marked", weight: 0 },
   PRESENT: { label: "Present", weight: 1 },
   DOUBLE_PRESENT: { label: "Double present (2P)", weight: 2 },
+  TRIPLE_PRESENT: { label: "Triple present (3P)", weight: 3 },
   HALF_DAY: { label: "Half day", weight: 0.5 },
   ABSENT: { label: "Absent", weight: 0 },
   LEAVE: { label: "Leave", weight: 0 },
@@ -24,20 +25,34 @@ export function normalizeAttendanceStatus(value) {
     NOT_MARKED: "NOT_MARKED",
     PRESENT: "PRESENT",
     DOUBLE_PRESENT: "DOUBLE_PRESENT",
+    TRIPLE_PRESENT: "TRIPLE_PRESENT",
     "2P": "DOUBLE_PRESENT",
+    "3P": "TRIPLE_PRESENT",
     HALF_DAY: "HALF_DAY",
     HALFDAY: "HALF_DAY",
     ABSENT: "ABSENT",
     LEAVE: "LEAVE",
   };
 
-  return map[normalized] || "NOT_MARKED";
+  if (map[normalized]) return map[normalized];
+
+  const repeatedPresent = normalized.match(
+    /^(P(?:\+P)+)(?:\+\d+(?:\.\d+)?)?$/,
+  );
+  if (repeatedPresent) {
+    return repeatedPresent[1].split("+").length === 3
+      ? "TRIPLE_PRESENT"
+      : "DOUBLE_PRESENT";
+  }
+
+  return "NOT_MARKED";
 }
 
 export function getWorkUnits(status) {
   const normalized = normalizeAttendanceStatus(status);
   if (normalized === "PRESENT") return 1;
   if (normalized === "DOUBLE_PRESENT") return 2;
+  if (normalized === "TRIPLE_PRESENT") return 3;
   if (normalized === "HALF_DAY") return 0.5;
   return 0;
 }

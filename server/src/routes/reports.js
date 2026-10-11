@@ -138,6 +138,7 @@ router.get(
       const counts = {
         PRESENT: 0,
         DOUBLE_PRESENT: 0,
+        TRIPLE_PRESENT: 0,
         ABSENT: 0,
         HALF_DAY: 0,
         LEAVE: 0,
@@ -177,6 +178,7 @@ router.get(
       (accumulator, item) => {
         accumulator.PRESENT += item.PRESENT;
         accumulator.DOUBLE_PRESENT += item.DOUBLE_PRESENT;
+        accumulator.TRIPLE_PRESENT += item.TRIPLE_PRESENT;
         accumulator.ABSENT += item.ABSENT;
         accumulator.HALF_DAY += item.HALF_DAY;
         accumulator.LEAVE += item.LEAVE;
@@ -187,6 +189,7 @@ router.get(
       {
         PRESENT: 0,
         DOUBLE_PRESENT: 0,
+        TRIPLE_PRESENT: 0,
         HALF_DAY: 0,
         ABSENT: 0,
         LEAVE: 0,

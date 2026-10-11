@@ -14,6 +14,10 @@ const companyClientSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true, maxlength: 150, default: "" },
     companyLabourRate: { type: Number, min: 0, default: 0 },
     originalLabourRate: { type: Number, min: 0, default: 0 },
+    zones: {
+      type: [{ type: String, trim: true, maxlength: 100 }],
+      default: [],
+    },
     active: { type: Boolean, default: true },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
