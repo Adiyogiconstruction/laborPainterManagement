@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   currentUsageDate,
+  getUsageDateRange,
   getUsagePeriodRange,
   summarizeAdminUsage,
+  summarizeAdminUsageByDay,
 } from "./adminUsage.js";
 
 test("returns India-local day, Monday-based week, month and year boundaries", () => {
@@ -32,6 +34,38 @@ test("defaults usage reports to the current India-local date", () => {
 test("rejects invalid dates and unsupported period values", () => {
   assert.throws(() => getUsagePeriodRange("decade", "2026-10-09"));
   assert.throws(() => getUsagePeriodRange("day", "2026-02-30"));
+});
+
+test("validates date ranges and uses India-local day boundaries", () => {
+  assert.deepEqual(getUsageDateRange("2026-10-08", "2026-10-09"), {
+    start: new Date("2026-10-07T18:30:00.000Z"),
+    end: new Date("2026-10-09T18:30:00.000Z"),
+  });
+  assert.throws(() => getUsageDateRange("2026-10-10", "2026-10-09"));
+  assert.throws(() => getUsageDateRange("2026-02-30", "2026-03-01"));
+});
+
+test("splits session time across India-local dates in a usage report", () => {
+  const rows = summarizeAdminUsageByDay(
+    [
+      {
+        startedAt: "2026-10-08T18:00:00.000Z",
+        endedAt: "2026-10-08T19:30:00.000Z",
+        expiresAt: "2026-10-08T20:00:00.000Z",
+      },
+    ],
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-10T00:00:00.000Z",
+  );
+
+  assert.deepEqual(
+    rows.map(({ date, totalMilliseconds }) => [date, totalMilliseconds]),
+    [
+      ["2026-10-08", 30 * 60 * 1000],
+      ["2026-10-09", 60 * 60 * 1000],
+    ],
+  );
 });
 
 test("sums only session time overlapping the selected period", () => {

@@ -7,6 +7,7 @@ import {
   Copy,
   FileDown,
   Lock,
+  RefreshCw,
   Save,
   XCircle,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   Status,
 } from "../components/ui/index.jsx";
 import styles from "../styles/design.module.css";
+import { buildDirtyAttendanceEntries } from "../utils/attendanceChanges.js";
 
 const statusMeta = {
   NOT_MARKED: { tone: "neutral", label: "Not marked", Icon: CalendarDays },
@@ -64,6 +66,7 @@ function MonthlyAttendance() {
   const [error, setError] = useState("");
   const [companyProfile, setCompanyProfile] = useState(null);
   const containerRef = useRef(null);
+  const originalCellsRef = useRef({});
 
   useEffect(() => {
     request(api.get("/company-profile"))
@@ -136,6 +139,7 @@ function MonthlyAttendance() {
       });
       setData(result);
       setCells(nextCells);
+      originalCellsRef.current = nextCells;
       setDrafts({});
       setPeriodStart(`${month}-01`);
       setPeriodEnd(`${month}-${String(result.days).padStart(2, "0")}`);
@@ -194,7 +198,8 @@ function MonthlyAttendance() {
   );
   const workerMatches = (worker) =>
     (workerStatus === "ALL" ||
-      (workerStatus === "ACTIVE" ? worker.active : !worker.active)) &&
+      (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
+        workerStatus) &&
     [worker.name, worker.phone].some((value) =>
       String(value || "")
         .toLocaleLowerCase()
@@ -368,22 +373,49 @@ function MonthlyAttendance() {
     }
   };
   const statusFor = (workerId, day) => cellFor(workerId, day).status;
+  const dirtyEntries = () =>
+    buildDirtyAttendanceEntries({
+      workers: data.workers,
+      days: data.days,
+      month,
+      cells,
+      originalCells: originalCellsRef.current,
+    });
+  const refreshAttendance = async () => {
+    if (
+      dirtyEntries().length &&
+      !window.confirm("Refresh attendance and discard unsaved changes?")
+    ) {
+      return;
+    }
+    await load();
+  };
   const save = async () => {
     setSaving(true);
     setError("");
     try {
-      const entries = data.workers.flatMap((worker) =>
-        Array.from({ length: data.days }, (_, index) => {
-          const day = index + 1;
-          return {
-            worker: worker._id,
-            date: `${month}-${String(day).padStart(2, "0")}`,
-            status: cellFor(worker._id, day).status,
-            overtimeHours: cellFor(worker._id, day).overtimeHours,
+      const cellsAtSave = cells;
+      const entries = dirtyEntries();
+      if (entries.length) {
+        await request(api.post("/attendance/bulk", { month, entries }));
+        const nextOriginalCells = { ...originalCellsRef.current };
+        for (const entry of entries) {
+          const key = `${entry.worker}:${entry.date}`;
+          const savedCell = cellsAtSave[key] || {
+            status: "NOT_MARKED",
+            overtimeHours: 0,
           };
-        }),
-      );
-      await request(api.post("/attendance/bulk", { month, entries }));
+          if (
+            savedCell.status === "NOT_MARKED" &&
+            Number(savedCell.overtimeHours || 0) === 0
+          ) {
+            delete nextOriginalCells[key];
+          } else {
+            nextOriginalCells[key] = savedCell;
+          }
+        }
+        originalCellsRef.current = nextOriginalCells;
+      }
       setSaved(true);
     } catch (err) {
       setError(errorMessage(err));
@@ -480,6 +512,14 @@ function MonthlyAttendance() {
           <div className={`${styles["actions-inline"]}`}>
             <button
               className={`${styles["button-secondary"]}`}
+              onClick={refreshAttendance}
+              disabled={saving || loading}
+              type="button"
+            >
+              <RefreshCw size={15} /> Refresh
+            </button>
+            <button
+              className={`${styles["button-secondary"]}`}
               onClick={downloadAttendancePdf}
               disabled={
                 generatingPdf || loading || !data.workers.filter(workerMatches).length
@@ -492,7 +532,13 @@ function MonthlyAttendance() {
             <button
               className={`${styles["button-primary"]}`}
               onClick={save}
-              disabled={saving || loading || data.locked || !data.canEdit}
+              disabled={
+                saving ||
+                loading ||
+                data.locked ||
+                !data.canEdit ||
+                dirtyEntries().length === 0
+              }
               type="button"
             >
               <Save size={15} /> {saving ? "Saving…" : "Save month"}
@@ -531,7 +577,10 @@ function MonthlyAttendance() {
                   (worker) => worker._id === event.target.value,
                 );
                 if (selectedWorker) {
-                  setWorkerStatus(selectedWorker.active ? "ACTIVE" : "INACTIVE");
+                  setWorkerStatus(
+                    selectedWorker.labourStatus ||
+                      (selectedWorker.active ? "ACTIVE" : "INACTIVE"),
+                  );
                 }
                 setPeriodWorker(event.target.value);
               }}
@@ -554,6 +603,7 @@ function MonthlyAttendance() {
             >
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
+              <option value="WENT_HOME">Went Home</option>
               <option value="ALL">All statuses</option>
             </select>
           </Field>
@@ -769,7 +819,9 @@ function MonthlyAttendance() {
                     <td>
                       <strong>{worker.name}</strong>
                       <small>
-                        Labour
+                        {worker.labourStatus === "WENT_HOME"
+                          ? "Went Home"
+                          : "Labour"}
                       </small>
                     </td>
                     {Array.from({ length: data.days }, (_, index) => {
@@ -790,15 +842,23 @@ function MonthlyAttendance() {
                             data-row={workerIndex}
                             data-col={day - 1}
                             data-worker={worker._id}
-                            className={`${styles["monthly-cell"]} ${styles[`monthly-${status.toLowerCase()}`]}`}
+                            className={`${styles["monthly-cell"]} ${styles[`monthly-${status.toLowerCase()}`]} ${worker.labourStatus === "WENT_HOME" ? styles["monthly-went-home"] : ""}`}
                             onChange={(event) =>
                               updateCell(worker._id, day, event.target.value)
                             }
                             onKeyDown={handleGridKeyDown}
                             onBlur={() => commitCell(worker._id, day)}
-                            disabled={data.locked || !data.canEdit}
-                            aria-label={`${worker.name}, ${month}-${String(day).padStart(2, "0")}`}
-                            title={`${worker.name}, ${month}-${String(day).padStart(2, "0")}: ${meta.label}`}
+                            disabled={
+                              data.locked ||
+                              !data.canEdit ||
+                              worker.labourStatus === "WENT_HOME"
+                            }
+                            aria-label={`${worker.name}, ${month}-${String(day).padStart(2, "0")}${worker.labourStatus === "WENT_HOME" ? ", attendance disabled because labour went home" : ""}`}
+                            title={
+                              worker.labourStatus === "WENT_HOME"
+                                ? `${worker.name}: attendance disabled because labour is marked Went Home`
+                                : `${worker.name}, ${month}-${String(day).padStart(2, "0")}: ${meta.label}`
+                            }
                           />
                         </td>
                       );

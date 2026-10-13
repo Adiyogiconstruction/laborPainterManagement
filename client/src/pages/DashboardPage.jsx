@@ -22,6 +22,7 @@ import {
   Field,
   PageHeader,
   Panel,
+  SearchBox,
 } from "../components/ui/index.jsx";
 import { ErrorNote, Metric, errorMessage } from "./shared.jsx";
 
@@ -50,6 +51,7 @@ const dateRangeForPeriod = (period) => {
 };
 
 const chartValue = (value) => Number(value || 0).toLocaleString("en-IN");
+const dashboardRefreshIntervalMs = 60_000;
 
 const compactMoney = (value) =>
   `₹${new Intl.NumberFormat("en-IN", {
@@ -68,18 +70,36 @@ export function DashboardPage() {
   const [to, setTo] = useState(today);
   const [period, setPeriod] = useState("MONTH");
   const [analyticsFilters, setAnalyticsFilters] = useState({
+    search: "",
+    workerStatus: "ACTIVE",
     worker: "",
     companyName: "",
     teamName: "",
     workZone: "",
   });
+  const [workerSearch, setWorkerSearch] = useState("");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const refreshInProgress = useRef(false);
+  const updateAnalyticsFilterValue = (field, value) =>
+    setAnalyticsFilters((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () =>
+        setAnalyticsFilters((current) => ({
+          ...current,
+          search: workerSearch,
+        })),
+      250,
+    );
+    return () => window.clearTimeout(timer);
+  }, [workerSearch]);
   const load = useCallback(
     () =>
       request(api.get("/dashboard/summary", { params: { type: businessType } }))
-        .then(setData)
-        .catch((err) => setError(errorMessage(err))),
+        .then(setData),
     [businessType],
   );
   const loadAnalytics = useCallback(
@@ -96,9 +116,7 @@ export function DashboardPage() {
             ),
           },
         }),
-      )
-        .then(setAnalytics)
-        .catch((err) => setError(errorMessage(err))),
+      ).then(setAnalytics),
     [from, to, period, ...Object.values(analyticsFilters)],
   );
   useEffect(() => {
@@ -112,6 +130,9 @@ export function DashboardPage() {
       refreshInProgress.current = true;
       try {
         await Promise.all([load(), loadAnalytics()]);
+        setError("");
+      } catch (err) {
+        setError(errorMessage(err));
       } finally {
         refreshInProgress.current = false;
       }
@@ -121,7 +142,7 @@ export function DashboardPage() {
     };
     const unsubscribeFromPaymentChanges = subscribeToPaymentChanges(refresh);
     refresh();
-    const intervalId = window.setInterval(refresh, 10_000);
+    const intervalId = window.setInterval(refresh, dashboardRefreshIntervalMs);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
@@ -188,10 +209,7 @@ export function DashboardPage() {
     { absent: 0 },
   );
   const updateAnalyticsFilter = (field) => (event) =>
-    setAnalyticsFilters((current) => ({
-      ...current,
-      [field]: event.target.value,
-    }));
+    updateAnalyticsFilterValue(field, event.target.value);
   return (
     <>
       <PageHeader
@@ -202,7 +220,7 @@ export function DashboardPage() {
       <Panel
         className={`${styles["dashboard-filter-panel"]} ${mobileFiltersOpen ? styles["dashboard-filters-open"] : ""}`}
         title="Dashboard filters"
-        detail="Choose a date range and narrow results by worker, company, team, or zone."
+        detail="Search labour by name, mobile, company, team, zone, or skill, then refine by status and date."
       >
         <button
           type="button"
@@ -217,6 +235,12 @@ export function DashboardPage() {
           className={`${styles["toolbar"]} ${styles["filter-bar"]}`}
           id="dashboard-filter-controls"
         >
+          <SearchBox
+            value={workerSearch}
+            onChange={setWorkerSearch}
+            placeholder="Search name, mobile, company, team, zone, or skill"
+            ariaLabel="Search labour by name, mobile, company, team, zone, or skill"
+          />
           <Field label="Period">
             <select value={period} onChange={updatePeriod}>
               <option value="ALL">All time</option>
@@ -262,6 +286,20 @@ export function DashboardPage() {
               ))}
             </select>
           </Field>
+          <Field label="Labour status">
+            <select
+              value={analyticsFilters.workerStatus}
+              onChange={(event) => {
+                updateAnalyticsFilter("workerStatus")(event);
+                updateAnalyticsFilterValue("worker", "");
+              }}
+            >
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="WENT_HOME">Went Home</option>
+              <option value="ALL">All statuses</option>
+            </select>
+          </Field>
           {[
             ["companyName", "Company", "companies", "company"],
             ["teamName", "Team", "teams", "team"],
@@ -293,7 +331,9 @@ export function DashboardPage() {
             <Metric
               label="Total labour"
               value={chartValue(
-                analytics.kpis.activeWorkers + analytics.kpis.inactiveWorkers,
+                analytics.kpis.activeWorkers +
+                  analytics.kpis.inactiveWorkers +
+                  analytics.kpis.wentHomeWorkers,
               )}
               detail="Profiles in current selection"
               tone="blue"
@@ -313,6 +353,14 @@ export function DashboardPage() {
               value={chartValue(analytics.kpis.inactiveWorkers)}
               detail="In current selection"
               tone="coral"
+              className={styles["metric-dashboard-inactive"]}
+              icon={UserRoundX}
+            />
+            <Metric
+              label="Went Home"
+              value={chartValue(analytics.kpis.wentHomeWorkers)}
+              detail="Not expected for attendance"
+              tone="amber"
               className={styles["metric-dashboard-inactive"]}
               icon={UserRoundX}
             />

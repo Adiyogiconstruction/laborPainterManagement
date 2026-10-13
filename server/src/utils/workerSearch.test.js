@@ -4,22 +4,27 @@ import { parseWorkerSearch } from "./workerSearch.js";
 
 test("matches active and inactive worker status keywords in text searches", () => {
   assert.deepEqual(parseWorkerSearch("active labour"), {
-    status: true,
+    status: "ACTIVE",
     remaining: "labour",
   });
 
   assert.deepEqual(parseWorkerSearch("inactive workers"), {
-    status: false,
+    status: "INACTIVE",
     remaining: "workers",
   });
 
   assert.deepEqual(parseWorkerSearch("inactie team"), {
-    status: false,
+    status: "INACTIVE",
     remaining: "team",
   });
 
   assert.deepEqual(parseWorkerSearch("ankit"), {
     status: undefined,
     remaining: "ankit",
+  });
+
+  assert.deepEqual(parseWorkerSearch("went home labour"), {
+    status: "WENT_HOME",
+    remaining: "labour",
   });
 });

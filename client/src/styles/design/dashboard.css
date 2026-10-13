@@ -377,10 +377,29 @@
 }
 .dashboard-filter-panel .filter-bar {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: end;
-  gap: 6px;
+  gap: 8px;
   margin: 0;
+}
+.dashboard-filter-panel .filter-bar > .search {
+  grid-column: span 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border-radius: 7px;
+}
+.dashboard-filter-panel .filter-bar > .search:focus-within {
+  box-shadow: none;
+}
+.dashboard-filter-panel .filter-bar > .search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 4px 0;
+  font-size: 10px;
+  outline: none;
+  box-shadow: none;
 }
 .dashboard-filter-panel .filter-bar > .field {
   min-width: 0;
@@ -408,7 +427,7 @@
   min-height: 38px;
 }
 .dashboard-metrics-primary {
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -960,6 +979,123 @@
   margin-bottom: 10px;
   padding: 13px;
 }
+.company-report-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(115px, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.company-report-filters > .field,
+.company-report-labour-picker {
+  min-width: 0;
+}
+.company-report-filters input,
+.company-report-filters select,
+.company-report-picker-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid #dce8e4;
+  border-radius: 8px;
+  background: #fff;
+  color: #263b37;
+  font: inherit;
+}
+.company-report-labour-picker {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  color: #60746f;
+  font-size: 10px;
+  font-weight: 700;
+}
+.company-report-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+.company-report-picker-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  width: min(330px, 88vw);
+  max-height: 300px;
+  overflow: auto;
+  padding: 7px;
+  border: 1px solid #dce8e4;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 8px 25px #233a301f;
+}
+.company-report-picker-menu > button,
+.company-report-picker-menu > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #344b44;
+  text-align: left;
+}
+.company-report-picker-menu > button {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+.company-report-picker-menu > label span {
+  flex: 1;
+}
+.company-report-picker-menu > label small {
+  color: #778780;
+  font-size: 9px;
+}
+.company-report-picker-menu input[type="checkbox"] {
+  width: 14px;
+  min-height: 14px;
+  accent-color: #15826b;
+}
+.company-report-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid #dce8e4;
+  border-radius: 7px;
+}
+.company-report-search input {
+  min-height: 28px;
+  padding: 3px;
+  border: 0;
+  outline: 0;
+}
+.company-report-filter-actions,
+.company-report-exports {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.company-report-filter-actions .button,
+.company-report-exports .button {
+  min-height: 35px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+.company-report-exports {
+  grid-column: 5 / -1;
+  justify-content: flex-end;
+}
+.company-detail-panel .company-detail-summary {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
 .company-detail-heading {
   display: inline-flex;
   align-items: center;
@@ -1072,29 +1208,29 @@
 }
 .company-detail-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1560px;
   table-layout: fixed;
   border-collapse: collapse;
   color: #405751;
   font-size: 10px;
 }
 .company-detail-col-labour {
-  width: 19%;
+  width: 14%;
 }
 .company-detail-col-zone {
-  width: 13%;
-}
-.company-detail-col-days {
-  width: 8%;
-}
-.company-detail-col-overtime {
   width: 10%;
 }
+.company-detail-col-days {
+  width: 6%;
+}
+.company-detail-col-overtime {
+  width: 7%;
+}
 .company-detail-col-money {
-  width: 17%;
+  width: 8%;
 }
 .company-detail-col-margin {
-  width: 16%;
+  width: 8%;
 }
 .company-detail-breakdown .table-wrap .company-detail-table th,
 .company-detail-breakdown .table-wrap .company-detail-table td {
@@ -1304,7 +1440,7 @@
 }
 .company-zone-edit-row {
   display: grid;
-  grid-template-columns: minmax(110px, 1.2fr) repeat(2, minmax(110px, 1fr)) auto;
+  grid-template-columns: minmax(110px, 1.2fr) repeat(4, minmax(95px, 1fr)) auto;
   align-items: end;
   gap: 7px;
   padding: 8px;

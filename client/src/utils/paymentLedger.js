@@ -21,8 +21,9 @@ export function filterAndSortWorkers(
     if (company && worker.companyName !== company) return false;
     if (team && worker.teamName !== team) return false;
     if (zone && worker.workZone !== zone) return false;
-    if (status === "ACTIVE" && !worker.active) return false;
-    if (status === "INACTIVE" && worker.active) return false;
+    const labourStatus =
+      worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE");
+    if (status !== "ALL" && status && labourStatus !== status) return false;
     const type = balanceType(worker);
     if (balance === "DUE" && type !== "DENA_HAI") return false;
     if (balance === "OVERPAID" && type !== "LENA_HAI") return false;

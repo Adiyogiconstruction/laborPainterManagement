@@ -70,6 +70,16 @@ const currentMonth = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
 
+const statusLabel = (worker) => {
+  const status =
+    worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE");
+  return status === "WENT_HOME"
+    ? "Went Home"
+    : status === "ACTIVE"
+      ? "Active"
+      : "Inactive";
+};
+
 const imageUrl = (worker, urlField, legacyPathField) => {
   const value = worker[urlField] || worker[legacyPathField];
   return value?.startsWith("http") ? value : `${apiOrigin}${value || ""}`;
@@ -93,7 +103,15 @@ const exportColumns = [
 ];
 
 const exportValue = (worker, key) => {
-  if (key === "active") return worker.active ? "Active" : "Inactive";
+  if (key === "active") {
+    const status =
+      worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE");
+    return status === "WENT_HOME"
+      ? "Went Home"
+      : status === "ACTIVE"
+        ? "Active"
+        : "Inactive";
+  }
   if (key === "joiningDate" || key === "ppeKitIssuedOn") {
     return worker[key] ? date(worker[key]) : "";
   }
@@ -110,11 +128,14 @@ const htmlValue = (value) =>
 function printWorkers(workers, type, profile = null) {
   const printWindow = window.open("", "_blank", "width=1200,height=800");
   if (!printWindow) return;
-  const headers = exportColumns.map(([label]) => `<th>${label}</th>`).join("");
+  const headers = [
+    "<th>Sr. No.</th>",
+    ...exportColumns.map(([label]) => `<th>${label}</th>`),
+  ].join("");
   const rows = workers
     .map(
-      (worker) =>
-        `<tr>${exportColumns
+      (worker, index) =>
+        `<tr><td>${index + 1}</td>${exportColumns
           .map(
             ([, key]) =>
               `<td>${String(exportValue(worker, key)).replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</td>`,
@@ -325,8 +346,8 @@ function printWorkerOnboardingCompact(worker, profile) {
 function WorkerForm({ initial, onClose, onSaved }) {
   const [companies, setCompanies] = useState([]);
   const [companyLoadError, setCompanyLoadError] = useState("");
-  const [form, setForm] = useState(
-    initial || {
+  const [form, setForm] = useState(() => ({
+    ...(initial || {
       type: "LABOUR",
       name: "",
       companyName: "",
@@ -340,10 +361,12 @@ function WorkerForm({ initial, onClose, onSaved }) {
       defaultDailyRate: "",
       overtimeHourlyRate: "",
       joiningDate: inputDate(),
+      labourStatus: "ACTIVE",
       address: "",
       notes: "",
-    },
-  );
+    }),
+    rateApplicableFrom: inputDate(),
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
@@ -373,6 +396,7 @@ function WorkerForm({ initial, onClose, onSaved }) {
         ...workerFields,
         defaultDailyRate: Number(form.defaultDailyRate || 0),
         overtimeHourlyRate: Number(form.overtimeHourlyRate || 0),
+        rateApplicableFrom: form.rateApplicableFrom,
       };
       const data = initial
         ? await request(api.patch(`/workers/${initial._id}`, body))
@@ -610,6 +634,17 @@ function WorkerForm({ initial, onClose, onSaved }) {
             placeholder="₹ per OT hour"
           />
         </Field>
+        <Field
+          label="Rate applicable from"
+          hint="This rate applies to attendance on this date and afterward."
+        >
+          <input
+            required
+            type="date"
+            value={form.rateApplicableFrom || inputDate()}
+            onChange={update("rateApplicableFrom")}
+          />
+        </Field>
         <Field label="Joining date">
           <input
             type="date"
@@ -619,13 +654,20 @@ function WorkerForm({ initial, onClose, onSaved }) {
         </Field>
         <Field label="Status">
           <select
-            value={String(form.active ?? true)}
-            onChange={(e) =>
-              setForm({ ...form, active: e.target.value === "true" })
+            value={
+              form.labourStatus || (form.active === false ? "INACTIVE" : "ACTIVE")
+            }
+            onChange={(event) =>
+              setForm({
+                ...form,
+                labourStatus: event.target.value,
+                active: event.target.value === "ACTIVE",
+              })
             }
           >
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+            <option value="WENT_HOME">Went Home</option>
           </select>
         </Field>
         <Field label="Address">
@@ -874,21 +916,39 @@ function WorkerHistory({ worker, onClose }) {
           </Panel>
           <Panel
             title="Employment status periods"
-            detail="Recorded active and inactive periods for this labour."
+            detail="Recorded employment status periods for this labour."
           >
             <div className={`${styles["status-periods"]}`}>
               <div className={`${styles["status-period-current"]}`}>
                 Current status:
-                <Status tone={worker.active ? "teal" : "neutral"}>
-                  {worker.active ? "Active" : "Inactive"}
+                <Status
+                  tone={
+                    (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
+                    "ACTIVE"
+                      ? "teal"
+                      : worker.labourStatus === "WENT_HOME"
+                        ? "amber"
+                        : "neutral"
+                  }
+                >
+                  {statusLabel(worker)}
                 </Status>
               </div>
               {statusPeriods.length ? (
                 <ol className={`${styles["status-period-list"]}`}>
                   {statusPeriods.map((period, index) => (
                     <li key={`${period.changedAt || "unknown"}-${index}`}>
-                      <Status tone={period.active ? "teal" : "neutral"}>
-                        {period.active ? "Active" : "Inactive"}
+                      <Status
+                        tone={
+                          (period.labourStatus ||
+                            (period.active ? "ACTIVE" : "INACTIVE")) === "ACTIVE"
+                            ? "teal"
+                            : period.labourStatus === "WENT_HOME"
+                              ? "amber"
+                              : "neutral"
+                        }
+                      >
+                        {statusLabel(period)}
                       </Status>
                       <span>
                         {period.changedAt ? date(period.changedAt) : "Start date not recorded"}
@@ -1149,7 +1209,9 @@ export function WorkersPage() {
   const filteredWorkers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return workers.filter((worker) => {
-      if (statusFilter && Boolean(worker.active) !== (statusFilter === "active")) {
+      const labourStatus =
+        worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE");
+      if (statusFilter && labourStatus !== statusFilter) {
         return false;
       }
       if (companyFilter && worker.companyName !== companyFilter) return false;
@@ -1198,7 +1260,14 @@ export function WorkersPage() {
     search.trim(),
   ].filter(Boolean).length;
   const workforceMetrics = useMemo(() => {
-    const activeCount = filteredWorkers.filter((worker) => worker.active).length;
+    const activeCount = filteredWorkers.filter(
+      (worker) =>
+        (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
+        "ACTIVE",
+    ).length;
+    const wentHomeCount = filteredWorkers.filter(
+      (worker) => worker.labourStatus === "WENT_HOME",
+    ).length;
     const ppeCount = filteredWorkers.filter(
       (worker) => worker.ppeKitIssuedOn,
     ).length;
@@ -1209,7 +1278,8 @@ export function WorkersPage() {
     return {
       total: filteredWorkers.length,
       active: activeCount,
-      inactive: filteredWorkers.length - activeCount,
+      inactive: filteredWorkers.length - activeCount - wentHomeCount,
+      wentHome: wentHomeCount,
       ppe: ppeCount,
       noPpe: filteredWorkers.length - ppeCount,
       averageRate: filteredWorkers.length
@@ -1241,6 +1311,7 @@ export function WorkersPage() {
           )
         : [worker, ...current],
     );
+    load();
   };
   const exportExcel = async () => {
     setExporting(true);
@@ -1413,8 +1484,9 @@ export function WorkersPage() {
             aria-label="Worker status filter"
           >
             <option value="">All status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+            <option value="WENT_HOME">Went Home</option>
           </select>
           <select
             value={companyFilter}
@@ -1511,6 +1583,13 @@ export function WorkersPage() {
               tone="coral"
             />
             <Metric
+              label="Went home"
+              value={number(workforceMetrics.wentHome)}
+              detail="No new attendance or payments"
+              icon={UserRoundX}
+              tone="amber"
+            />
+            <Metric
               label="Labour with PPE"
               value={number(workforceMetrics.ppe)}
               detail="PPE issue recorded"
@@ -1564,9 +1643,12 @@ export function WorkersPage() {
                 <tr
                   key={worker._id}
                   className={
-                    worker.active
+                    (worker.labourStatus ||
+                      (worker.active ? "ACTIVE" : "INACTIVE")) === "ACTIVE"
                       ? styles["worker-active"]
-                      : styles["worker-inactive"]
+                      : worker.labourStatus === "WENT_HOME"
+                        ? styles["worker-went-home"]
+                        : styles["worker-inactive"]
                   }
                 >
                   <td>
@@ -1609,8 +1691,17 @@ export function WorkersPage() {
                     {money(worker.overtimeHourlyRate || 0)}/hr
                   </td>
                   <td>
-                    <Status tone={worker.active ? "green" : "coral"}>
-                      {worker.active ? "Active" : "Inactive"}
+                    <Status
+                      tone={
+                        (worker.labourStatus ||
+                          (worker.active ? "ACTIVE" : "INACTIVE")) === "ACTIVE"
+                          ? "green"
+                          : worker.labourStatus === "WENT_HOME"
+                            ? "amber"
+                            : "coral"
+                      }
+                    >
+                      {statusLabel(worker)}
                     </Status>
                   </td>
                   <td>

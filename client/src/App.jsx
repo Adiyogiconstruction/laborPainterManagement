@@ -8,25 +8,77 @@ import { LoginPage } from "./pages/LoginPage.jsx";
 const isValidSession = (session) =>
   Boolean(session?.user?.name && session?.user?.role);
 
+const cachedSessionKey = "labour-management-session-user";
+
+const readCachedSession = () => {
+  try {
+    const cached = JSON.parse(
+      window.sessionStorage.getItem(cachedSessionKey) || "null",
+    );
+    if (!isValidSession(cached)) return null;
+    return { user: { name: cached.user.name, role: cached.user.role } };
+  } catch (error) {
+    console.warn("Unable to read the cached administrator session.", error);
+    return null;
+  }
+};
+
+const writeCachedSession = (session) => {
+  try {
+    window.sessionStorage.setItem(
+      cachedSessionKey,
+      JSON.stringify({
+        user: { name: session.user.name, role: session.user.role },
+      }),
+    );
+  } catch (error) {
+    console.warn("Unable to cache the administrator session.", error);
+  }
+};
+
+const clearCachedSession = () => {
+  try {
+    window.sessionStorage.removeItem(cachedSessionKey);
+  } catch (error) {
+    console.warn("Unable to clear the cached administrator session.", error);
+  }
+};
+
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [checking, setChecking] = useState(
-    !new URLSearchParams(window.location.hash.slice(1)).has("resetToken"),
+  const hasResetToken = new URLSearchParams(
+    window.location.hash.slice(1),
+  ).has("resetToken");
+  const [session, setSession] = useState(() =>
+    hasResetToken ? null : readCachedSession(),
   );
+  const [checking, setChecking] = useState(!hasResetToken && !session);
   const navigate = useNavigate();
   useEffect(() => {
-    if (new URLSearchParams(window.location.hash.slice(1)).has("resetToken")) {
-      setChecking(false);
+    if (hasResetToken) {
+      clearCachedSession();
       return;
     }
-    request(api.get("/auth/me"))
-      .then(({ user }) => {
+    api
+      .get("/auth/me")
+      .then(({ data: { user } }) => {
         const nextSession = { user };
         if (!isValidSession(nextSession)) throw new Error("Invalid session");
         setSession(nextSession);
+        writeCachedSession(nextSession);
       })
-      .catch(() => {
-        setSession(null);
+      .catch((error) => {
+        if (error.response?.status === 401) {
+          clearCachedSession();
+          setSession(null);
+        } else if (!session) {
+          setSession(null);
+          console.error("Unable to verify the administrator session.", error);
+        } else {
+          console.error(
+            "Unable to refresh the administrator session; keeping the cached workspace visible.",
+            error,
+          );
+        }
       })
       .finally(() => setChecking(false));
   }, []);
@@ -41,6 +93,7 @@ export default function App() {
         await api.post("/auth/session/heartbeat");
       } catch (error) {
         if (error.response?.status === 401 && active) {
+          clearCachedSession();
           setSession(null);
           navigate("/");
         } else {
@@ -65,11 +118,14 @@ export default function App() {
   const authenticated = (data) => {
     if (!isValidSession(data)) throw new Error("Invalid login response.");
     const { user } = data;
-    setSession({ user });
+    const nextSession = { user };
+    setSession(nextSession);
+    writeCachedSession(nextSession);
     navigate("/");
   };
   const logout = async () => {
     await request(api.post("/auth/logout"));
+    clearCachedSession();
     setSession(null);
     navigate("/");
   };

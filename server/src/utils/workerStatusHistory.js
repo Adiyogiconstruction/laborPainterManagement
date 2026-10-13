@@ -5,10 +5,22 @@ export function appendWorkerStatusTransition(
   changedAt = new Date(),
 ) {
   const events = [...(Array.isArray(history) ? history : [])];
-  if (previousStatus === nextStatus) return events;
+  const normalize = (status) =>
+    typeof status === "boolean" ? (status ? "ACTIVE" : "INACTIVE") : status;
+  const previous = normalize(previousStatus);
+  const next = normalize(nextStatus);
+  if (previous === next) return events;
+  const eventFor = (status, date) =>
+    typeof status === "boolean"
+      ? { active: status, changedAt: date }
+      : {
+          active: status === "ACTIVE",
+          labourStatus: status,
+          changedAt: date,
+        };
   if (!events.length) {
-    events.push({ active: previousStatus, changedAt: null });
+    events.push(eventFor(previousStatus, null));
   }
-  events.push({ active: nextStatus, changedAt });
+  events.push(eventFor(nextStatus, changedAt));
   return events;
 }

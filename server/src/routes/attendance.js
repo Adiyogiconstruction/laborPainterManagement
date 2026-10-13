@@ -4,11 +4,13 @@ import Worker from "../models/Worker.js";
 import AttendanceSheet from "../models/AttendanceSheet.js";
 import {
   getCompanyWorkerRates,
+  getWorkerRateHistory,
   loadCompanyWorkerRateHistory,
 } from "../utils/companyWorkerRates.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
+import { getWorkerLabourStatus } from "../utils/workerStatus.js";
 import {
   buildAttendanceMap,
   calculatePayableAmount,
@@ -206,12 +208,13 @@ router.get(
           new Date(end.getTime() - 1),
           rateContext,
         ).overtimeRate,
-        rateHistory: (
-          rateContext.ratesByWorker.get(String(worker._id)) || []
+        rateHistory: getWorkerRateHistory(
+          worker,
+          rateContext.ratesByWorker.get(String(worker._id)) || [],
         ).map((rate) => ({
           applicableFrom: rate.applicableFrom.toISOString().slice(0, 10),
-          dailyRate: rate.labourDailyRate,
-          overtimeRate: rate.labourOvertimeRate,
+          dailyRate: rate.dailyRate,
+          overtimeRate: rate.overtimeRate,
         })),
       })),
       attendance,
@@ -274,14 +277,34 @@ router.post(
       if (entryDate < start || entryDate >= end) continue;
       const key = `${worker._id}:${entry.date}`;
       const existing = existingByKey.get(key);
+      const status = normalizeAttendanceStatus(entry.status);
+      if (
+        getWorkerLabourStatus(worker) === "WENT_HOME" &&
+        status !== "NOT_MARKED" &&
+        existing?.status === status &&
+        Number(existing?.overtimeHours || 0) ===
+          Number(entry.overtimeHours ?? existing?.overtimeHours ?? 0)
+      ) {
+        continue;
+      }
       if (existing?.locked) {
         throw new ApiError(409, `Attendance for ${entry.date} is locked.`);
       }
-      const status = normalizeAttendanceStatus(entry.status);
+      if (
+        getWorkerLabourStatus(worker) === "WENT_HOME" &&
+        status !== "NOT_MARKED"
+      ) {
+        throw new ApiError(
+          400,
+          "Attendance cannot be recorded for labour marked Went Home.",
+        );
+      }
       if (status === "NOT_MARKED") {
-        operations.push({
-          deleteOne: { filter: { worker: worker._id, date: entryDate } },
-        });
+        if (entry.clear === true && existing) {
+          operations.push({
+            deleteOne: { filter: { worker: worker._id, date: entryDate } },
+          });
+        }
         continue;
       }
       const overtimeHours = Number(
@@ -304,6 +327,9 @@ router.post(
       const companyDailyRate = Number(
         existing?.companyDailyRate ?? effectiveRates.companyDailyRate,
       );
+      const companyOvertimeRate = Number(
+        existing?.companyOvertimeRate ?? effectiveRates.companyOvertimeRate ?? 0,
+      );
       operations.push({
         updateOne: {
           filter: { worker: worker._id, date: entryDate },
@@ -323,6 +349,7 @@ router.post(
               dailyRate,
               overtimeRate,
               companyDailyRate,
+              companyOvertimeRate,
               workZone: existing?.workZone || worker.workZone,
               payableAmount: calculatePayableAmount({
                 dailyRate,
@@ -388,6 +415,12 @@ router.put(
       deletedAt: null,
     });
     if (!workerRecord) throw new ApiError(404, "Worker not found.");
+    if (getWorkerLabourStatus(workerRecord) === "WENT_HOME") {
+      throw new ApiError(
+        400,
+        "Attendance cannot be recorded for labour marked Went Home.",
+      );
+    }
     const workerType = workerRecord.type;
     const baseDate = asDateOnly(date);
     const existing = await Attendance.findOne({ worker, date: baseDate });
@@ -419,6 +452,9 @@ router.put(
     const companyDailyRate = Number(
       existing?.companyDailyRate ?? effectiveRates.companyDailyRate,
     );
+    const companyOvertimeRate = Number(
+      existing?.companyOvertimeRate ?? effectiveRates.companyOvertimeRate ?? 0,
+    );
     const attendanceZone = existing?.workZone || workerRecord.workZone;
     const payableAmount = calculatePayableAmount({
       dailyRate: rateSnapshot,
@@ -444,6 +480,7 @@ router.put(
         dailyRate: rateSnapshot,
         overtimeRate: finalOvertimeRate,
         companyDailyRate,
+        companyOvertimeRate,
         workZone: attendanceZone,
         payableAmount,
         leaveReason: leaveReason || "",
@@ -495,7 +532,19 @@ router.post(
       date: yesterday,
     });
 
-    const rows = sourceRows.map((item) => ({
+    const sourceWorkers = await Worker.find({
+      _id: { $in: sourceRows.map((item) => item.worker) },
+    }).select("_id labourStatus active");
+    const workersById = new Map(
+      sourceWorkers.map((worker) => [String(worker._id), worker]),
+    );
+    const eligibleRows = sourceRows.filter(
+      (item) =>
+        getWorkerLabourStatus(workersById.get(String(item.worker))) !==
+        "WENT_HOME",
+    );
+    const workerIds = [...new Set(eligibleRows.map((item) => String(item.worker)))];
+    const rows = eligibleRows.map((item) => ({
       ...item.toObject(),
       _id: undefined,
       date: targetDate,
@@ -512,6 +561,7 @@ router.post(
 
     await Attendance.deleteMany({
       date: targetDate,
+      worker: { $in: workerIds },
     });
     const inserted = await Attendance.insertMany(rows);
     await recordAdminActivity(

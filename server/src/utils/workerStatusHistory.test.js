@@ -35,3 +35,18 @@ test("unchanged status does not create a duplicate period", () => {
 
   assert.deepEqual(appendWorkerStatusTransition(history, true, true), history);
 });
+
+test("status history records Went Home separately from Inactive", () => {
+  const changedAt = new Date("2026-10-03T10:00:00.000Z");
+  const history = appendWorkerStatusTransition(
+    [{ active: false, labourStatus: "INACTIVE", changedAt: null }],
+    "INACTIVE",
+    "WENT_HOME",
+    changedAt,
+  );
+
+  assert.deepEqual(history, [
+    { active: false, labourStatus: "INACTIVE", changedAt: null },
+    { active: false, labourStatus: "WENT_HOME", changedAt },
+  ]);
+});

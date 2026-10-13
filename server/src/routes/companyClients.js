@@ -11,6 +11,13 @@ import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { getAssignmentDaysInRange } from "../utils/companyAssignmentUtils.js";
+import {
+  getWorkerRateHistory,
+  upsertWorkerRateHistory,
+} from "../utils/companyWorkerRates.js";
+import {
+  recalculateAttendanceForWorkerRate,
+} from "../utils/workerRateHistory.js";
 
 const router = Router();
 const editable = [
@@ -111,6 +118,11 @@ const parseDateOnly = (value, label) => {
   return date;
 };
 
+const finiteNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
 const normalizeCompanyZoneRates = (body, zones = [], role) => {
   if (role !== "OWNER" || body.zoneRates === undefined) return null;
   if (!Array.isArray(body.zoneRates)) {
@@ -142,15 +154,27 @@ const normalizeCompanyZoneRates = (body, zones = [], role) => {
       }
       const dailyRate = Number(rate.companyDailyRate);
       const labourDailyRate = Number(rate.labourDailyRate);
+      const overtimeHourlyRate = Number(rate.overtimeHourlyRate || 0);
+      const labourOvertimeRate = Number(rate.labourOvertimeRate || 0);
       if (
         !Number.isFinite(dailyRate) ||
         dailyRate < 0 ||
         !Number.isFinite(labourDailyRate) ||
-        labourDailyRate < 0
+        labourDailyRate < 0 ||
+        !Number.isFinite(overtimeHourlyRate) ||
+        overtimeHourlyRate < 0 ||
+        !Number.isFinite(labourOvertimeRate) ||
+        labourOvertimeRate < 0
       ) {
         throw new ApiError(400, `Enter valid company and labour rates for ${zone}.`);
       }
-      return { zone, dailyRate, labourDailyRate };
+      return {
+        zone,
+        dailyRate,
+        overtimeHourlyRate,
+        labourDailyRate,
+        labourOvertimeRate,
+      };
     });
   if (rates.length !== configuredZones.size) {
     throw new ApiError(400, "Set company and labour rates for every configured zone.");
@@ -161,7 +185,8 @@ const normalizeCompanyZoneRates = (body, zones = [], role) => {
 const saveCompanyZoneRates = async (company, zoneRates, userId) => {
   if (!zoneRates?.rates.length) return;
   await Promise.all(
-    zoneRates.rates.map(({ zone, dailyRate, labourDailyRate }) =>
+    zoneRates.rates.map(
+      ({ zone, dailyRate, overtimeHourlyRate, labourDailyRate, labourOvertimeRate }) =>
       CompanyZoneRate.findOneAndUpdate(
         {
           company: company._id,
@@ -169,7 +194,12 @@ const saveCompanyZoneRates = async (company, zoneRates, userId) => {
           applicableFrom: zoneRates.applicableFrom,
         },
         {
-          $set: { dailyRate, labourDailyRate },
+          $set: {
+            dailyRate,
+            overtimeHourlyRate,
+            labourDailyRate,
+            labourOvertimeRate,
+          },
           $setOnInsert: {
             company: company._id,
             zone,
@@ -179,6 +209,18 @@ const saveCompanyZoneRates = async (company, zoneRates, userId) => {
         },
         { upsert: true, runValidators: true },
       ),
+    ),
+  );
+};
+
+const applyCompanyZoneRateChanges = async (company, applicableFrom, userId) => {
+  const workers = await Worker.find({
+    companyName: company.name,
+    type: "LABOUR",
+  });
+  await Promise.all(
+    workers.map((worker) =>
+      recalculateAttendanceForWorkerRate(worker, applicableFrom, userId),
     ),
   );
 };
@@ -202,27 +244,33 @@ const getAssignmentRates = async (company, zone, startDate) => {
 };
 
 const getEffectiveWorkerRate = (history, date, company, worker, zoneRate) => {
-  let effective;
   const effectiveDate = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
   );
-  for (const rate of history) {
-    if (rate.applicableFrom > effectiveDate) break;
+  let effective;
+  for (const rate of getWorkerRateHistory(worker, history)) {
+    if (new Date(rate.applicableFrom) > effectiveDate) break;
     effective = rate;
   }
+  const hasWorkerHistory = Boolean(worker.rateHistory?.length);
   return {
     companyDailyRate:
-      effective?.companyDailyRate ?? Number(company.companyLabourRate || 0),
-    labourDailyRate:
-      Number(
-        effective?.labourDailyRate ||
+      history
+        .filter((rate) => rate.applicableFrom <= effectiveDate)
+        .at(-1)?.companyDailyRate ?? Number(company.companyLabourRate || 0),
+    companyOvertimeRate: zoneRate?.overtimeHourlyRate ?? 0,
+    labourDailyRate: effective
+      ? Number(effective.dailyRate)
+      : Number(
           worker.defaultDailyRate ||
-          zoneRate?.labourDailyRate ||
-          0,
-      ),
-    labourOvertimeRate:
-      effective?.labourOvertimeRate ??
-      Number(worker.overtimeHourlyRate || 0),
+            (hasWorkerHistory && !worker.rateHistoryFallbackToZone
+              ? 0
+              : zoneRate?.labourDailyRate) ||
+            0,
+        ),
+    labourOvertimeRate: effective
+      ? Number(effective.overtimeRate)
+      : Number(worker.overtimeHourlyRate || zoneRate?.labourOvertimeRate || 0),
   };
 };
 
@@ -299,7 +347,9 @@ router.get(
             zone,
             configured: Boolean(rate),
             dailyRate: rate?.dailyRate ?? Number(company.companyLabourRate || 0),
+            overtimeHourlyRate: rate?.overtimeHourlyRate ?? 0,
             labourDailyRate: rate?.labourDailyRate ?? 0,
+            labourOvertimeRate: rate?.labourOvertimeRate ?? 0,
           };
         });
         return serializeCompany(company, req.user.role, zoneRates, zones);
@@ -393,15 +443,28 @@ router.get(
     const company = await CompanyClient.findById(req.params.id);
     if (!company) throw new ApiError(404, "Company/client not found.");
     const month = String(req.query.month || "");
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-      throw new ApiError(400, "Month must use YYYY-MM format.");
+    let rangeStart;
+    let rangeEnd;
+    if (req.query.from || req.query.to) {
+      if (!req.query.from || !req.query.to) {
+        throw new ApiError(400, "Both report dates are required.");
+      }
+      rangeStart = parseDateOnly(String(req.query.from), "From");
+      const rangeLastDate = parseDateOnly(String(req.query.to), "To");
+      if (rangeStart > rangeLastDate) {
+        throw new ApiError(400, "The report start date must not follow its end date.");
+      }
+      rangeEnd = new Date(rangeLastDate);
+      rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
+    } else {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        throw new ApiError(400, "Month must use YYYY-MM format.");
+      }
+      const [year, monthNumber] = month.split("-").map(Number);
+      rangeStart = new Date(Date.UTC(year, monthNumber - 1, 1));
+      rangeEnd = new Date(Date.UTC(year, monthNumber, 1));
     }
-    const [year, monthNumber] = month.split("-").map(Number);
-    const rangeStart = new Date(year, monthNumber - 1, 1);
-    const rangeEnd = new Date(year, monthNumber, 1);
-    const ratesThroughDate = new Date(
-      Date.UTC(year, monthNumber, 0, 23, 59, 59, 999),
-    );
+    const ratesThroughDate = new Date(rangeEnd.getTime() - 1);
     const today = new Date();
     const todayUtcEnd = new Date(
       Date.UTC(
@@ -421,6 +484,15 @@ router.get(
       50,
       Math.max(10, Number.parseInt(req.query.pageSize, 10) || 10),
     );
+    const requestedWorkerIds = String(req.query.workerIds || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+    const noWorkersRequested = requestedWorkerIds.includes("__none__");
+    const selectedWorkerIds = new Set(
+      requestedWorkerIds.filter((id) => id !== "__none__"),
+    );
+    const teamFilter = String(req.query.team || "");
     const workerFilter = {
       companyName: company.name,
       deletedAt: null,
@@ -428,7 +500,7 @@ router.get(
     };
     const [allWorkers, zones] = await Promise.all([
       Worker.find(workerFilter)
-        .select("_id name workZone active companyName defaultDailyRate overtimeHourlyRate")
+        .select("_id name workZone active teamName companyName defaultDailyRate overtimeHourlyRate rateHistory rateHistoryFallbackToZone")
         .sort({ name: 1 })
         .lean(),
       Worker.distinct("workZone", {
@@ -476,7 +548,7 @@ router.get(
         },
       ],
     })
-      .select("worker company companyName date status workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate workZone")
+      .select("worker company companyName date status workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate companyOvertimeRate workZone")
       .sort({ date: 1 })
       .lean();
     const attendanceWorkerIds = [
@@ -488,7 +560,7 @@ router.get(
           deletedAt: null,
           type: "LABOUR",
         })
-          .select("_id name workZone active companyName defaultDailyRate overtimeHourlyRate")
+          .select("_id name workZone active teamName companyName defaultDailyRate overtimeHourlyRate rateHistory rateHistoryFallbackToZone")
           .lean()
       : [];
     const workerById = new Map(
@@ -502,14 +574,22 @@ router.get(
       (req.query.zone === "Unassigned"
         ? !String(zone || "").trim()
         : normalizeZoneKey(zone) === normalizeZoneKey(req.query.zone));
+    const workerMatches = (worker) =>
+      (!teamFilter || worker.teamName === teamFilter) &&
+      !noWorkersRequested &&
+      (!selectedWorkerIds.size || selectedWorkerIds.has(String(worker._id)));
     const includedWorkerIds = new Set(
       allWorkers
-        .filter((worker) => zoneMatches(worker.workZone))
+        .filter((worker) => zoneMatches(worker.workZone) && workerMatches(worker))
         .map((worker) => String(worker._id)),
     );
     for (const record of attendance) {
       const worker = workerById.get(String(record.worker));
-      if (worker && zoneMatches(record.workZone || worker.workZone)) {
+      if (
+        worker &&
+        zoneMatches(record.workZone || worker.workZone) &&
+        workerMatches(worker)
+      ) {
         includedWorkerIds.add(String(worker._id));
       }
     }
@@ -543,6 +623,12 @@ router.get(
           overtimeHours: 0,
           companyBilling: 0,
           labourSalary: 0,
+          dutyProfit: 0,
+          overtimeProfit: 0,
+          companyDailyRates: new Set(),
+          companyOvertimeRates: new Set(),
+          labourDailyRates: new Set(),
+          labourOvertimeRates: new Set(),
         },
       ]),
     );
@@ -551,10 +637,11 @@ router.get(
       const worker = workersById.get(String(record.worker));
       if (!worker) continue;
       if (!zoneMatches(record.workZone || worker.workZone)) continue;
+      if (!workerMatches(worker)) continue;
       const stats = statsByWorker.get(String(record.worker));
       if (!stats) continue;
-      const workUnits = Number(record.workUnits || 0);
-      const overtimeHours = Number(record.overtimeHours || 0);
+      const workUnits = finiteNumber(record.workUnits);
+      const overtimeHours = finiteNumber(record.overtimeHours);
       const attendanceZone = record.workZone || worker.workZone;
       if (attendanceZone) {
         if (!zonesByWorker.has(String(record.worker))) {
@@ -576,17 +663,34 @@ router.get(
       stats.attendanceEntries += 1;
       if (workUnits > 0) stats.days += 1;
       stats.overtimeHours += overtimeHours;
-      stats.companyBilling +=
-        Number(
-          record.companyDailyRate ?? zoneRate?.dailyRate ?? rates.companyDailyRate,
-        ) *
-        workUnits;
-      stats.labourSalary += Number(
-        record.payableAmount ??
-          Number(record.dailyRate ?? rates.labourDailyRate) * workUnits +
-            Number(record.overtimeRate ?? rates.labourOvertimeRate) *
-              overtimeHours,
+      const companyDailyRate = finiteNumber(
+        record.companyDailyRate ?? zoneRate?.dailyRate ?? rates.companyDailyRate,
       );
+      const companyOvertimeRate = finiteNumber(
+        record.companyOvertimeRate ??
+          zoneRate?.overtimeHourlyRate ??
+          rates.companyOvertimeRate ??
+          0,
+      );
+      const labourDailyRate = finiteNumber(record.dailyRate ?? rates.labourDailyRate);
+      const labourOvertimeRate = finiteNumber(
+        record.overtimeRate ?? rates.labourOvertimeRate,
+      );
+      const companyDutyBilling = companyDailyRate * workUnits;
+      const companyOvertimeBilling = companyOvertimeRate * overtimeHours;
+      const labourDutySalary = labourDailyRate * workUnits;
+      const labourOvertimeSalary = labourOvertimeRate * overtimeHours;
+      stats.companyDailyRates.add(companyDailyRate);
+      stats.companyOvertimeRates.add(companyOvertimeRate);
+      stats.labourDailyRates.add(labourDailyRate);
+      stats.labourOvertimeRates.add(labourOvertimeRate);
+      stats.companyBilling += companyDutyBilling + companyOvertimeBilling;
+      stats.labourSalary += finiteNumber(
+        record.payableAmount,
+        labourDutySalary + labourOvertimeSalary,
+      );
+      stats.dutyProfit += companyDutyBilling - labourDutySalary;
+      stats.overtimeProfit += companyOvertimeBilling - labourOvertimeSalary;
     }
     const totals = [...statsByWorker.values()].reduce(
       (result, stats) => ({
@@ -595,6 +699,8 @@ router.get(
         overtimeHours: result.overtimeHours + stats.overtimeHours,
         companyBilling: result.companyBilling + stats.companyBilling,
         labourSalary: result.labourSalary + stats.labourSalary,
+        dutyProfit: result.dutyProfit + stats.dutyProfit,
+        overtimeProfit: result.overtimeProfit + stats.overtimeProfit,
       }),
       {
         attendanceEntries: 0,
@@ -602,44 +708,65 @@ router.get(
         overtimeHours: 0,
         companyBilling: 0,
         labourSalary: 0,
+        dutyProfit: 0,
+        overtimeProfit: 0,
       },
     );
     const workers = visibleWorkers
       .slice((page - 1) * pageSize, page * pageSize)
-      .map((worker) => ({
-        id: worker._id,
-        name: worker.name,
-        zone:
-          [...(zonesByWorker.get(String(worker._id)) || [])].join(", ") ||
-          worker.workZone ||
-          "Unassigned",
-        active: worker.active,
-        ...statsByWorker.get(String(worker._id)),
-        rates: {
-          ...getEffectiveWorkerRate(
-            ratesByWorker.get(String(worker._id)) || [],
+      .map((worker) => {
+        const stats = statsByWorker.get(String(worker._id));
+        const currentRates = getEffectiveWorkerRate(
+          ratesByWorker.get(String(worker._id)) || [],
+          today,
+          company,
+          worker,
+          getEffectiveZoneRateRecord(
+            zoneRatesByName.get(normalizeZoneKey(worker.workZone)) || [],
             today,
-            company,
-            worker,
-            getEffectiveZoneRateRecord(
-              zoneRatesByName.get(normalizeZoneKey(worker.workZone)) || [],
-              today,
-            ),
           ),
-          companyDailyRate:
-            getEffectiveZoneRate(
-              zoneRatesByName.get(normalizeZoneKey(worker.workZone)) || [],
-              today,
-            ) ??
-            getEffectiveWorkerRate(
-              ratesByWorker.get(String(worker._id)) || [],
-              today,
-              company,
-              worker,
-            ).companyDailyRate,
-        },
-      }));
+        );
+        const {
+          companyDailyRates,
+          companyOvertimeRates,
+          labourDailyRates,
+          labourOvertimeRates,
+          ...reportStats
+        } = stats;
+        return {
+          id: worker._id,
+          name: worker.name,
+          zone:
+            [...(zonesByWorker.get(String(worker._id)) || [])].join(", ") ||
+            worker.workZone ||
+            "Unassigned",
+          active: worker.active,
+          team: worker.teamName || "Unassigned",
+          ...reportStats,
+          rates: {
+            labourDailyRate: currentRates.labourDailyRate,
+            labourOvertimeRate: currentRates.labourOvertimeRate,
+            companyDaily: [...companyDailyRates],
+            companyOvertime: [...companyOvertimeRates],
+            labourDaily: [...labourDailyRates],
+            labourOvertime: [...labourOvertimeRates],
+          },
+        };
+      });
     const margin = totals.companyBilling - totals.labourSalary;
+    totals.margin = margin;
+    const rateSummary = {
+      companyDaily: new Set(),
+      companyOvertime: new Set(),
+      labourDaily: new Set(),
+      labourOvertime: new Set(),
+    };
+    for (const stats of statsByWorker.values()) {
+      for (const key of Object.keys(rateSummary)) {
+        const sourceKey = `${key}Rates`;
+        for (const rate of stats[sourceKey] || []) rateSummary[key].add(rate);
+      }
+    }
     res.json({
       company: {
         id: company._id,
@@ -655,13 +782,33 @@ router.get(
             zone,
             dailyRate:
               effective?.dailyRate ?? Number(company.companyLabourRate || 0),
+            overtimeHourlyRate: effective?.overtimeHourlyRate ?? 0,
             labourDailyRate: effective?.labourDailyRate ?? 0,
+            labourOvertimeRate: effective?.labourOvertimeRate ?? 0,
             configured: Boolean(effective),
           };
         }),
       },
       month,
+      dateRange: {
+        from: rangeStart.toISOString().slice(0, 10),
+        to: new Date(rangeEnd.getTime() - 86400000).toISOString().slice(0, 10),
+      },
       zone: String(req.query.zone || ""),
+      team: teamFilter,
+      selectedWorkerIds: noWorkersRequested ? [] : [...selectedWorkerIds],
+      teams: [...new Set(allWorkers.map((worker) => worker.teamName).filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right)),
+      labourOptions: allWorkers
+        .map((worker) => ({
+          id: worker._id,
+          name: worker.name,
+          team: worker.teamName || "Unassigned",
+          zone: worker.workZone || "Unassigned",
+        })),
+      rateSummary: Object.fromEntries(
+        Object.entries(rateSummary).map(([key, values]) => [key, [...values]]),
+      ),
       zones: [...new Set([
         ...zoneNames,
         ...zones.map((zone) => zone || "Unassigned"),
@@ -730,30 +877,22 @@ router.patch(
       },
       { new: true, upsert: true, runValidators: true },
     );
-    const today = new Date();
-    const todayUtc = new Date(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+    upsertWorkerRateHistory(
+      worker,
+      applicableFrom,
+      rates.labourDailyRate,
+      rates.labourOvertimeRate,
     );
-    if (applicableFrom <= todayUtc) {
-      const currentRate = await CompanyWorkerRate.findOne({
-        company: company._id,
-        worker: worker._id,
-        applicableFrom: { $lte: todayUtc },
-      })
-        .sort({ applicableFrom: -1 })
-        .lean();
-      if (currentRate) {
-        await Worker.updateOne(
-          { _id: worker._id },
-          {
-            $set: {
-              defaultDailyRate: currentRate.labourDailyRate,
-              overtimeHourlyRate: currentRate.labourOvertimeRate,
-            },
-          },
-        );
-      }
+    if (worker.rateHistory.length === 1) {
+      worker.rateHistoryFallbackToZone =
+        Number(worker.defaultDailyRate || 0) === 0;
     }
+    await worker.save();
+    await recalculateAttendanceForWorkerRate(
+      worker,
+      applicableFrom,
+      req.user.id,
+    );
     await recordAdminActivity(
       req,
       "UPDATE",
@@ -986,6 +1125,13 @@ router.post(
       createdBy: req.user.id,
     });
     await saveCompanyZoneRates(company, zoneRates, req.user.id);
+    if (zoneRates) {
+      await applyCompanyZoneRateChanges(
+        company,
+        zoneRates.applicableFrom,
+        req.user.id,
+      );
+    }
     await recordAdminActivity(
       req,
       "CREATE",
@@ -1050,6 +1196,13 @@ router.patch(
       await Worker.updateMany(
         { companyName: previousName },
         { $set: { companyName: company.name } },
+      );
+    }
+    if (zoneRates) {
+      await applyCompanyZoneRateChanges(
+        company,
+        zoneRates.applicableFrom,
+        req.user.id,
       );
     }
     await recordAdminActivity(

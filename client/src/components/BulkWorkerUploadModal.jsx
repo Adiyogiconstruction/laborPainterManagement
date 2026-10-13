@@ -7,8 +7,8 @@ import { parseWorkerUploadFile } from "../utils/workerUploadFile.js";
 
 const downloadTemplate = () => {
   const template = [
-    "name,phone,aadhaarNumber,address,skill,defaultDailyRate,joiningDate,companyName,teamName,workZone,overtimeHourlyRate,active,notes",
-    'Ramesh Yadav,9876543210,123456789012,"Village, District",Mason,600,2026-10-09,Example Company,Alpha,Mumbai,60,true,',
+    "name,phone,aadhaarNumber,address,skill,defaultDailyRate,rateApplicableFrom,joiningDate,companyName,teamName,workZone,overtimeHourlyRate,labourStatus,notes",
+    'Ramesh Yadav,9876543210,123456789012,"Village, District",Mason,600,2026-10-09,2026-10-09,Example Company,Alpha,Mumbai,60,ACTIVE,',
   ].join("\r\n");
   const url = URL.createObjectURL(
     new Blob([`\uFEFF${template}`], { type: "text/csv;charset=utf-8" }),
@@ -29,12 +29,13 @@ const downloadExcelTemplate = async () => {
     "address",
     "skill",
     "defaultDailyRate",
+    "rateApplicableFrom",
     "joiningDate",
     "companyName",
     "teamName",
     "workZone",
     "overtimeHourlyRate",
-    "active",
+    "labourStatus",
     "notes",
   ].map((key) => [key, key]);
   const workbook = buildWorkforceWorkbook(
@@ -46,12 +47,13 @@ const downloadExcelTemplate = async () => {
         address: "Village, District",
         skill: "Mason",
         defaultDailyRate: 600,
+        rateApplicableFrom: "2026-10-09",
         joiningDate: "2026-10-09",
         companyName: "Example Company",
         teamName: "Alpha",
         workZone: "Mumbai",
         overtimeHourlyRate: 60,
-        active: true,
+        labourStatus: "ACTIVE",
         notes: "",
       },
     ],
@@ -96,6 +98,16 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
       const get = (cells, key) =>
         String(cells[indexes.get(key.toLowerCase())] ?? "");
       const parsed = rows.map(({ rowNumber, cells }) => {
+        const suppliedStatus = get(cells, "labourStatus")
+          .trim()
+          .toUpperCase()
+          .replace(/\s+/g, "_");
+        const legacyActive = get(cells, "active").toLowerCase();
+        const labourStatus = suppliedStatus
+          ? suppliedStatus
+          : ["no", "false", "0", "inactive"].includes(legacyActive)
+            ? "INACTIVE"
+            : "ACTIVE";
         const worker = {
           type: "LABOUR",
           name: get(cells, "name"),
@@ -104,17 +116,20 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
           address: get(cells, "address"),
           skill: get(cells, "skill"),
           defaultDailyRate: Number(get(cells, "defaultDailyRate") || 0),
+          rateApplicableFrom: get(cells, "rateApplicableFrom"),
           joiningDate: get(cells, "joiningDate"),
           companyName: get(cells, "companyName"),
           teamName: get(cells, "teamName"),
           workZone: get(cells, "workZone"),
           overtimeHourlyRate: Number(get(cells, "overtimeHourlyRate") || 0),
-          active: !["no", "false", "0", "inactive"].includes(
-            get(cells, "active").toLowerCase(),
-          ),
+          labourStatus,
+          active: labourStatus === "ACTIVE",
           notes: get(cells, "notes"),
         };
         const issues = [];
+        if (!["ACTIVE", "INACTIVE", "WENT_HOME"].includes(labourStatus)) {
+          issues.push("Labour status invalid");
+        }
         if (!worker.name?.trim()) issues.push("Name required");
         if (!worker.workZone?.trim()) issues.push("Work zone required");
         if (worker.aadhaarNumber && !/^\d{12}$/.test(worker.aadhaarNumber)) {
@@ -131,6 +146,16 @@ export function BulkWorkerUploadModal({ onClose, onCompleted }) {
           Number.isNaN(Date.parse(worker.joiningDate))
         ) {
           issues.push("Joining date invalid");
+        }
+        if (
+          worker.rateApplicableFrom &&
+          (!/^\d{4}-\d{2}-\d{2}$/.test(worker.rateApplicableFrom) ||
+            Number.isNaN(Date.parse(`${worker.rateApplicableFrom}T00:00:00Z`)) ||
+            new Date(`${worker.rateApplicableFrom}T00:00:00Z`)
+              .toISOString()
+              .slice(0, 10) !== worker.rateApplicableFrom)
+        ) {
+          issues.push("Rate applicable date invalid");
         }
         return { rowNumber, worker, issues };
       });

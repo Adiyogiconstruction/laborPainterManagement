@@ -57,13 +57,32 @@ export async function loadCompanyWorkerRateHistory(workers, throughDate) {
 
 export function getCompanyWorkerRates(worker, date, context) {
   const history = context.ratesByWorker.get(String(worker._id)) || [];
-  let effective;
   const effectiveDate = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
   );
+  let effective;
   for (const rate of history) {
     if (rate.applicableFrom > effectiveDate) break;
-    effective = rate;
+    effective = {
+      applicableFrom: rate.applicableFrom,
+      dailyRate: rate.labourDailyRate,
+      overtimeRate: rate.labourOvertimeRate,
+      companyDailyRate: rate.companyDailyRate,
+      companyOvertimeRate: rate.companyOvertimeRate,
+    };
+  }
+  for (const rate of worker.rateHistory || []) {
+    const applicableFrom = new Date(rate.applicableFrom);
+    if (applicableFrom > effectiveDate) continue;
+    if (!effective || applicableFrom >= effective.applicableFrom) {
+      effective = {
+        applicableFrom,
+        dailyRate: rate.dailyRate,
+        overtimeRate: rate.overtimeRate,
+        companyDailyRate: effective?.companyDailyRate,
+        companyOvertimeRate: effective?.companyOvertimeRate,
+      };
+    }
   }
   const company = context.companyByName.get(worker.companyName);
   const zoneHistory =
@@ -80,15 +99,101 @@ export function getCompanyWorkerRates(worker, date, context) {
       effectiveZoneRate?.dailyRate ??
       effective?.companyDailyRate ??
       Number(company?.companyLabourRate || 0),
-    dailyRate:
-      Number(
-        effective?.labourDailyRate ||
+    companyOvertimeRate:
+      effectiveZoneRate?.overtimeHourlyRate ??
+      effective?.companyOvertimeRate ??
+      0,
+    dailyRate: effective
+      ? Number(effective.dailyRate)
+      : Number(
           worker.defaultDailyRate ||
-          effectiveZoneRate?.labourDailyRate ||
-          0,
-      ),
-    overtimeRate:
-      effective?.labourOvertimeRate ??
-      Number(worker.overtimeHourlyRate || 0),
+            (worker.rateHistory?.length &&
+            !worker.rateHistoryFallbackToZone
+              ? 0
+              : effectiveZoneRate?.labourDailyRate) ||
+            0,
+        ),
+    overtimeRate: effective
+      ? Number(effective.overtimeRate)
+      : Number(
+          worker.overtimeHourlyRate ||
+            effectiveZoneRate?.labourOvertimeRate ||
+            0,
+        ),
   };
+}
+
+export function workerRateChangesAtDate(
+  worker,
+  date,
+  dailyRate,
+  overtimeRate,
+  context,
+) {
+  const effective = getCompanyWorkerRates(worker, date, context);
+  return (
+    (dailyRate !== undefined &&
+      Number(dailyRate) !== effective.dailyRate) ||
+    (overtimeRate !== undefined &&
+      Number(overtimeRate) !== effective.overtimeRate)
+  );
+}
+
+export function getWorkerRateHistory(worker, companyRates = []) {
+  const byDate = new Map();
+  for (const rate of companyRates) {
+    byDate.set(new Date(rate.applicableFrom).toISOString().slice(0, 10), {
+      applicableFrom: rate.applicableFrom,
+      dailyRate: rate.labourDailyRate,
+      overtimeRate: rate.labourOvertimeRate,
+    });
+  }
+  for (const rate of worker.rateHistory || []) {
+    byDate.set(new Date(rate.applicableFrom).toISOString().slice(0, 10), {
+      applicableFrom: rate.applicableFrom,
+      dailyRate: rate.dailyRate,
+      overtimeRate: rate.overtimeRate,
+    });
+  }
+  return [...byDate.values()].sort(
+    (left, right) =>
+      new Date(left.applicableFrom).getTime() -
+      new Date(right.applicableFrom).getTime(),
+  );
+}
+
+export function upsertWorkerRateHistory(
+  worker,
+  applicableFrom,
+  dailyRate,
+  overtimeRate,
+) {
+  const date = new Date(applicableFrom);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Rate effective date is invalid.");
+  }
+  const day = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  const existing = (worker.rateHistory || []).find(
+    (rate) =>
+      new Date(rate.applicableFrom).toISOString().slice(0, 10) ===
+      day.toISOString().slice(0, 10),
+  );
+  if (existing) {
+    existing.dailyRate = dailyRate;
+    existing.overtimeRate = overtimeRate;
+  } else {
+    worker.rateHistory.push({
+      applicableFrom: day,
+      dailyRate,
+      overtimeRate,
+    });
+  }
+  worker.rateHistory.sort(
+    (left, right) =>
+      new Date(left.applicableFrom).getTime() -
+      new Date(right.applicableFrom).getTime(),
+  );
+  return day;
 }

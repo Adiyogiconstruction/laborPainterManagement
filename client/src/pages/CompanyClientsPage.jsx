@@ -7,6 +7,10 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  FileDown,
+  Printer,
+  Search,
+  ChevronDown,
 } from "lucide-react";
 import styles from "../styles/design.module.css";
 import api, { request } from "../services/apiClient.js";
@@ -33,7 +37,9 @@ const localDateInput = (value) => {
 const blankZoneRate = () => ({
   zone: "",
   companyDailyRate: "",
+  overtimeHourlyRate: "0",
   labourDailyRate: "",
+  labourOvertimeRate: "0",
 });
 
 const blankForm = () => ({
@@ -83,13 +89,28 @@ const periodLabel = (period) =>
 
 const rangeLabel = (range) =>
   `${date(`${range.from}T00:00:00`)} – ${date(`${range.to}T00:00:00`)}`;
+const rateLabel = (values = []) =>
+  values.length
+    ? [...new Set(values.map(Number).filter(Number.isFinite))]
+        .sort((left, right) => left - right)
+        .map(money)
+        .join(" · ") || "—"
+    : "—";
+const workerIdsFilter = (selection) =>
+  selection === null ? "" : selection.length ? selection.join(",") : "__none__";
 
 const blankAssignment = () => {
   const today = localDateInput(new Date());
   return { labourCount: "", zone: "", startDate: today, endDate: "", ongoing: true };
 };
 
-const currentMonthValue = () => localDateInput(new Date()).slice(0, 7);
+const currentMonthRange = () => {
+  const now = new Date();
+  return {
+    from: localDateInput(new Date(now.getFullYear(), now.getMonth(), 1)),
+    to: localDateInput(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+};
 
 function LabourRateEditor({ worker, onSave, saving }) {
   const [open, setOpen] = useState(false);
@@ -166,8 +187,17 @@ function LabourRateEditor({ worker, onSave, saving }) {
 export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   const [companies, setCompanies] = useState([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
-  const [detailMonth, setDetailMonth] = useState(currentMonthValue);
+  const [detailRange, setDetailRange] = useState(currentMonthRange);
+  const [appliedDetailRange, setAppliedDetailRange] = useState(currentMonthRange);
   const [detailZone, setDetailZone] = useState("");
+  const [appliedDetailZone, setAppliedDetailZone] = useState("");
+  const [detailTeam, setDetailTeam] = useState("");
+  const [appliedDetailTeam, setAppliedDetailTeam] = useState("");
+  const [selectedWorkers, setSelectedWorkers] = useState(null);
+  const [appliedSelectedWorkers, setAppliedSelectedWorkers] = useState(null);
+  const [labourSearch, setLabourSearch] = useState("");
+  const [labourMenuOpen, setLabourMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(10);
   const [companyOverview, setCompanyOverview] = useState(null);
@@ -251,7 +281,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   }, [includeInactive]);
 
   useEffect(() => {
-    if (!isOwner || !selectedCompanyId || !detailMonth) {
+    if (!isOwner || !selectedCompanyId || !appliedDetailRange.from || !appliedDetailRange.to) {
       setCompanyOverview(null);
       setDetailLoading(false);
       return undefined;
@@ -263,8 +293,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     request(
       api.get(`/companies/${selectedCompanyId}/overview`, {
         params: {
-          month: detailMonth,
-          zone: detailZone,
+          from: appliedDetailRange.from,
+          to: appliedDetailRange.to,
+          zone: appliedDetailZone,
+          team: appliedDetailTeam,
+          workerIds: workerIdsFilter(appliedSelectedWorkers),
           page: detailPage,
           pageSize: detailPageSize,
         },
@@ -285,8 +318,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   }, [
     isOwner,
     selectedCompanyId,
-    detailMonth,
-    detailZone,
+    appliedDetailRange.from,
+    appliedDetailRange.to,
+    appliedDetailZone,
+    appliedDetailTeam,
+    appliedSelectedWorkers,
     detailPage,
     detailPageSize,
   ]);
@@ -325,6 +361,195 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     includeInactive,
     profitRefresh,
   ]);
+
+  const applyReportFilters = () => {
+    if (!detailRange.from || !detailRange.to || detailRange.from > detailRange.to) {
+      setDetailError("Choose a valid report date range.");
+      return;
+    }
+    setDetailError("");
+    setAppliedDetailRange({ ...detailRange });
+    setAppliedDetailZone(detailZone);
+    setAppliedDetailTeam(detailTeam);
+    setAppliedSelectedWorkers(selectedWorkers === null ? null : [...selectedWorkers]);
+    setDetailPage(1);
+    setLabourMenuOpen(false);
+  };
+
+  const resetReportFilters = () => {
+    const range = currentMonthRange();
+    setDetailRange(range);
+    setAppliedDetailRange(range);
+    setDetailZone("");
+    setAppliedDetailZone("");
+    setDetailTeam("");
+    setAppliedDetailTeam("");
+    setSelectedWorkers(null);
+    setAppliedSelectedWorkers(null);
+    setLabourSearch("");
+    setDetailPage(1);
+    setDetailError("");
+  };
+
+  const loadAllReportWorkers = async () => {
+    if (!companyOverview || !selectedCompanyId) return [];
+    setExporting(true);
+    setDetailError("");
+    try {
+      const params = {
+        from: appliedDetailRange.from,
+        to: appliedDetailRange.to,
+        zone: appliedDetailZone,
+        team: appliedDetailTeam,
+        workerIds: workerIdsFilter(appliedSelectedWorkers),
+        page: 1,
+        pageSize: 50,
+      };
+      const firstPage = await request(
+        api.get(`/companies/${selectedCompanyId}/overview`, { params }),
+      );
+      const rows = [...firstPage.workers];
+      for (let page = 2; page <= firstPage.pagination.pages; page += 1) {
+        const result = await request(
+          api.get(`/companies/${selectedCompanyId}/overview`, {
+            params: { ...params, page },
+          }),
+        );
+        rows.push(...result.workers);
+      }
+      return rows;
+    } catch (err) {
+      setDetailError(errorMessage(err));
+      throw err;
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportReportPdf = async () => {
+    try {
+      const rows = await loadAllReportWorkers();
+      const { downloadCompanyProfitPdf } = await import("../utils/companyProfitPdf.js");
+      downloadCompanyProfitPdf({
+        company: companyOverview.company,
+        filters: {
+          ...appliedDetailRange,
+          zone: appliedDetailZone || "All zones",
+          team: appliedDetailTeam || "All teams",
+          labours:
+            appliedSelectedWorkers === null
+              ? "All labour"
+              : `${appliedSelectedWorkers.length} selected`,
+        },
+        rows,
+        totals: companyOverview.totals,
+      });
+    } catch (err) {
+      setDetailError(errorMessage(err));
+    }
+  };
+
+  const exportReportExcel = async () => {
+    try {
+      const rows = await loadAllReportWorkers();
+      const { buildWorkforceWorkbook } = await import("../utils/workforceExcel.js");
+      const columns = [
+        ["Labour", "name"],
+        ["Team", "team"],
+        ["Zone", "zone"],
+        ["Marked days", "attendanceEntries"],
+        ["Days", "days"],
+        ["OT hours", "overtimeHours"],
+        ["Company billing", "companyBilling"],
+        ["Labour salary", "labourSalary"],
+        ["Duty profit", "dutyProfit"],
+        ["OT profit", "overtimeProfit"],
+        ["Total profit", "profit"],
+      ];
+      const workbook = buildWorkforceWorkbook(
+        rows,
+        columns,
+        (row, key) =>
+          key === "profit"
+            ? Number(row.companyBilling || 0) - Number(row.labourSalary || 0)
+            : row[key] ?? "",
+        [
+          ["Company", companyOverview.company.name],
+          ["Date range", `${appliedDetailRange.from} to ${appliedDetailRange.to}`],
+          ["Zone", appliedDetailZone || "All zones"],
+          ["Team", appliedDetailTeam || "All teams"],
+          ["Company billing", companyOverview.totals.companyBilling],
+          ["Labour salary", companyOverview.totals.labourSalary],
+          ["Duty profit", companyOverview.totals.dutyProfit],
+          ["Overtime profit", companyOverview.totals.overtimeProfit],
+          ["Total profit", companyOverview.totals.margin],
+        ],
+      );
+      const url = URL.createObjectURL(
+        new Blob([workbook], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `labour-profit-${appliedDetailRange.from}-to-${appliedDetailRange.to}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err) setDetailError(errorMessage(err));
+    }
+  };
+
+  const printReport = async () => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setDetailError("Allow pop-ups to print this report.");
+      return;
+    }
+    try {
+      const rows = await loadAllReportWorkers();
+      const escapeHtml = (value) =>
+        String(value ?? "").replace(/[&<>"']/g, (character) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[character]);
+      const tableRows = rows.map((row) => `
+        <tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.team)}</td><td>${escapeHtml(row.zone)}</td>
+        <td>${row.days}</td><td>${row.overtimeHours}</td><td>${money(row.companyBilling)}</td>
+        <td>${money(row.labourSalary)}</td><td>${money(row.companyBilling - row.labourSalary)}</td></tr>`).join("");
+      printWindow.document.write(`<!doctype html><html><head><title>Labour-wise Profit Sheet</title>
+        <style>body{font:12px Arial;color:#172c26;padding:24px}h1{font-size:20px}p{color:#52635e}
+        table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #ccd8d4;padding:7px;text-align:left}
+        th{background:#ecf5f0}@media print{body{padding:0}}</style></head><body>
+        <h1>${escapeHtml(companyOverview.company.name)} · Labour-wise Profit Sheet</h1>
+        <p>${escapeHtml(appliedDetailRange.from)} to ${escapeHtml(appliedDetailRange.to)} · ${escapeHtml(appliedDetailZone || "All zones")} · ${escapeHtml(appliedDetailTeam || "All teams")}</p>
+        <table><thead><tr><th>Labour</th><th>Team</th><th>Zone</th><th>Days</th><th>OT hours</th><th>Company billing</th><th>Labour salary</th><th>Profit</th></tr></thead>
+        <tbody>${tableRows}</tbody></table>
+        <p>Company billing: ${escapeHtml(money(companyOverview.totals.companyBilling))} ·
+        Labour salary: ${escapeHtml(money(companyOverview.totals.labourSalary))} ·
+        Duty profit: ${escapeHtml(money(companyOverview.totals.dutyProfit))} ·
+        OT profit: ${escapeHtml(money(companyOverview.totals.overtimeProfit))} ·
+        Total profit: ${escapeHtml(money(companyOverview.totals.margin))}</p></body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (err) {
+      printWindow.close();
+      setDetailError(errorMessage(err));
+    }
+  };
+
+  const availableLabours = (companyOverview?.labourOptions || []).filter(
+    (labour) =>
+      (!detailTeam || labour.team === detailTeam) &&
+      (!detailZone ||
+        (detailZone === "Unassigned"
+          ? labour.zone === "Unassigned"
+          : labour.zone.toLocaleLowerCase() === detailZone.toLocaleLowerCase())),
+  );
 
   const trackingCompanyId = trackingCompany?._id;
   useEffect(() => {
@@ -444,9 +669,15 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               companyDailyRate: currentRate?.configured
                 ? String(currentRate.dailyRate)
                 : "",
+              overtimeHourlyRate: currentRate?.configured
+                ? String(currentRate.overtimeHourlyRate ?? 0)
+                : "0",
               labourDailyRate: currentRate?.configured
                 ? String(currentRate.labourDailyRate)
                 : "",
+              labourOvertimeRate: currentRate?.configured
+                ? String(currentRate.labourOvertimeRate ?? 0)
+                : "0",
             };
           })
         : [blankZoneRate()],
@@ -495,8 +726,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       const result = await request(
         api.get(`/companies/${selectedCompanyId}/overview`, {
           params: {
-            month: detailMonth,
-            zone: detailZone,
+            from: appliedDetailRange.from,
+            to: appliedDetailRange.to,
+            zone: appliedDetailZone,
+            team: appliedDetailTeam,
+            workerIds: workerIdsFilter(appliedSelectedWorkers),
             page: detailPage,
             pageSize: detailPageSize,
           },
@@ -876,86 +1110,200 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
           title={
             <span className={styles["company-detail-heading"]}>
               <BarChart3 size={16} />
-              Attendance-based labour profit
+              Labour-wise Profit Sheet
             </span>
           }
-          detail="Owner-only actual attendance calculation: company billing minus saved labour salary, grouped by the company assigned on the labour profile when attendance was marked. Expenses are excluded."
+          detail="Company billing and labour salary are calculated from saved attendance and the effective rates for each work date. Expenses are excluded."
           className={styles["company-detail-panel"]}
-          action={
-            <div className={styles["company-detail-filters"]}>
-              <Field label="Company">
-                <select
-                  value={selectedCompanyId}
-                  onChange={(event) => {
-                    setSelectedCompanyId(event.target.value);
-                    setDetailZone("");
-                    setDetailPage(1);
-                    setZoneRateForm((current) => ({ ...current, zone: "" }));
-                  }}
-                >
-                  {companies.map((company) => (
-                    <option key={company._id} value={company._id}>
-                      {company.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Period">
-                <input
-                  type="month"
-                  value={detailMonth}
-                  onChange={(event) => {
-                    setDetailMonth(event.target.value);
-                    setDetailPage(1);
-                  }}
-                />
-              </Field>
-              <Field label="Zone">
-                <select
-                  value={detailZone}
-                  onChange={(event) => {
-                    setDetailZone(event.target.value);
-                    setDetailPage(1);
-                  }}
-                >
-                  <option value="">All zones</option>
-                  {(companyOverview?.zones || []).map((zone) => (
-                    <option key={zone} value={zone}>
-                      {zone}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          }
         >
           {detailError && <ErrorNote error={detailError} />}
+          <div className={styles["company-report-filters"]}>
+            <Field label="Company">
+              <select
+                value={selectedCompanyId}
+                onChange={(event) => {
+                  setSelectedCompanyId(event.target.value);
+                  setDetailPage(1);
+                  setSelectedWorkers(null);
+                  setAppliedSelectedWorkers(null);
+                  setDetailZone("");
+                  setAppliedDetailZone("");
+                  setDetailTeam("");
+                  setAppliedDetailTeam("");
+                  setZoneRateForm((current) => ({ ...current, zone: "" }));
+                }}
+              >
+                {companies.map((company) => (
+                  <option key={company._id} value={company._id}>
+                    {company.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="From">
+              <input
+                type="date"
+                value={detailRange.from}
+                max={detailRange.to}
+                onChange={(event) =>
+                  setDetailRange((range) => ({ ...range, from: event.target.value }))
+                }
+              />
+            </Field>
+            <Field label="To">
+              <input
+                type="date"
+                value={detailRange.to}
+                min={detailRange.from}
+                onChange={(event) =>
+                  setDetailRange((range) => ({ ...range, to: event.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Zone">
+              <select
+                value={detailZone}
+                onChange={(event) => {
+                  setDetailZone(event.target.value);
+                  setSelectedWorkers(null);
+                }}
+              >
+                <option value="">All zones</option>
+                {(companyOverview?.zones || []).map((zone) => (
+                  <option key={zone} value={zone}>{zone}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Team">
+              <select
+                value={detailTeam}
+                onChange={(event) => {
+                  setDetailTeam(event.target.value);
+                  setSelectedWorkers(null);
+                }}
+              >
+                <option value="">All teams</option>
+                {(companyOverview?.teams || []).map((team) => (
+                  <option key={team} value={team}>{team}</option>
+                ))}
+              </select>
+            </Field>
+            <div className={styles["company-report-labour-picker"]}>
+              <span>Labour</span>
+              <Button
+                type="button"
+                className={styles["company-report-picker-trigger"]}
+                aria-expanded={labourMenuOpen}
+                onClick={() => setLabourMenuOpen((open) => !open)}
+              >
+                {selectedWorkers === null ? "All labour" : `${selectedWorkers.length} selected`}
+                <ChevronDown size={14} />
+              </Button>
+              {labourMenuOpen && (
+                <div className={styles["company-report-picker-menu"]}>
+                  <label className={styles["company-report-search"]}>
+                    <Search size={14} />
+                    <input
+                      value={labourSearch}
+                      onChange={(event) => setLabourSearch(event.target.value)}
+                      placeholder="Search labour"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWorkers(null)}
+                  >
+                    Select all labour
+                  </button>
+                  {availableLabours
+                    .filter((labour) =>
+                      labour.name.toLocaleLowerCase().includes(labourSearch.toLocaleLowerCase()),
+                    )
+                    .map((labour) => (
+                      <label key={labour.id}>
+                        <input
+                          type="checkbox"
+                          checked={
+                            selectedWorkers === null ||
+                            selectedWorkers.includes(String(labour.id))
+                          }
+                          onChange={(event) =>
+                            setSelectedWorkers((current) => {
+                              const allIds = availableLabours.map(
+                                (option) => String(option.id),
+                              );
+                              const selected = current === null ? allIds : current;
+                              return event.target.checked
+                                ? [...new Set([...selected, String(labour.id)])]
+                                : selected.filter((id) => id !== String(labour.id));
+                            })
+                          }
+                        />
+                        <span>{labour.name}</span>
+                        <small>{labour.team}</small>
+                      </label>
+                    ))}
+                </div>
+              )}
+            </div>
+            <div className={styles["company-report-filter-actions"]}>
+              <Button
+                type="button"
+                className={styles["button-primary"]}
+                onClick={applyReportFilters}
+              >
+                Apply filters
+              </Button>
+              <Button
+                type="button"
+                className={styles["button-secondary"]}
+                onClick={resetReportFilters}
+              >
+                Reset
+              </Button>
+            </div>
+            <div className={styles["company-report-exports"]}>
+              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={exportReportPdf}>
+                <FileDown size={15} /> PDF
+              </Button>
+              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={exportReportExcel}>
+                <FileDown size={15} /> Excel
+              </Button>
+              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={printReport}>
+                <Printer size={15} /> Print
+              </Button>
+            </div>
+          </div>
           {detailLoading && !companyOverview ? (
             <Empty title="Loading company details…" />
           ) : companyOverview ? (
             <>
               <div className={styles["company-detail-summary"]}>
                 {[
-                  ["Company billing", companyOverview.totals.companyBilling, "billing"],
-                  ["Labour salary", companyOverview.totals.labourSalary, "salary"],
-                  ["Labour margin", companyOverview.totals.margin, "margin"],
-                ].map(([label, value, tone]) => (
+                  ["Company rate / day", rateLabel(companyOverview.rateSummary.companyDaily), "billing"],
+                  ["Labour rate / day", rateLabel(companyOverview.rateSummary.labourDaily), "salary"],
+                  ["Company OT / hour", rateLabel(companyOverview.rateSummary.companyOvertime), "billing"],
+                  ["Labour OT / hour", rateLabel(companyOverview.rateSummary.labourOvertime), "salary"],
+                  ["Duty profit", money(companyOverview.totals.dutyProfit), "margin", companyOverview.totals.dutyProfit < 0],
+                  ["OT profit", money(companyOverview.totals.overtimeProfit), "margin", companyOverview.totals.overtimeProfit < 0],
+                  ["Total profit", money(companyOverview.totals.margin), "margin", companyOverview.totals.margin < 0],
+                ].map(([label, value, tone, negative]) => (
                   <article
-                    className={`${styles[`company-detail-${tone}`]} ${tone === "margin" && Number(value) < 0 ? styles["company-assignment-loss"] : ""}`}
+                    className={`${styles[`company-detail-${tone}`]} ${negative ? styles["company-assignment-loss"] : ""}`}
                     key={label}
                   >
                     <Building2 size={18} />
                     <span>
                       <small>{label}</small>
-                      <strong>{money(value)}</strong>
+                      <strong>{value}</strong>
                     </span>
                   </article>
                 ))}
               </div>
               <div className={styles["company-detail-breakdown"]}>
-                <h3>Actual attendance-based labour margin</h3>
+                <h3>Labour profitability by attendance</h3>
                 <p>
-                  {detailMonth} · {detailZone || "All zones"} · Only saved attendance is included; absent/zero-work entries have no company billing, and missing attendance is not assumed to mean absent. Company attribution is saved from the labour profile when attendance is recorded. Expenses are excluded.
+                  {rangeLabel(appliedDetailRange)} · {appliedDetailZone || "All zones"} · {appliedDetailTeam || "All teams"} · Daily and overtime values use saved effective-date rate snapshots. Expenses are excluded.
                 </p>
                 <div className={styles["table-wrap"]}>
                   <table className={styles["company-detail-table"]}>
@@ -965,20 +1313,24 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       <col className={styles["company-detail-col-days"]} />
                       <col className={styles["company-detail-col-days"]} />
                       <col className={styles["company-detail-col-overtime"]} />
-                      <col className={styles["company-detail-col-money"]} />
-                      <col className={styles["company-detail-col-money"]} />
-                      <col className={styles["company-detail-col-margin"]} />
+                      {Array.from({ length: 7 }, (_, index) => (
+                        <col className={styles["company-detail-col-money"]} key={index} />
+                      ))}
                     </colgroup>
                     <thead>
                       <tr>
                         <th>Labour</th>
+                        <th>Team</th>
                         <th>Zone</th>
-                        <th>Marked days</th>
                         <th>Days</th>
                         <th>OT hours</th>
-                        <th>Company billing</th>
-                        <th>Labour salary</th>
-                        <th>Margin</th>
+                        <th>Company rate/day</th>
+                        <th>Labour rate/day</th>
+                        <th>Company OT/hr</th>
+                        <th>Labour OT/hr</th>
+                        <th>Duty profit</th>
+                        <th>OT profit</th>
+                        <th>Total profit</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -986,12 +1338,16 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                         <Fragment key={worker.id}>
                           <tr>
                             <th>{worker.name}</th>
+                            <td>{worker.team}</td>
                             <td>{worker.zone}</td>
-                            <td>{worker.attendanceEntries}</td>
                             <td>{worker.days}</td>
                             <td>{worker.overtimeHours}</td>
-                            <td>{money(worker.companyBilling)}</td>
-                            <td>{money(worker.labourSalary)}</td>
+                            <td>{rateLabel(worker.rates.companyDaily)}</td>
+                            <td>{rateLabel(worker.rates.labourDaily)}</td>
+                            <td>{rateLabel(worker.rates.companyOvertime)}</td>
+                            <td>{rateLabel(worker.rates.labourOvertime)}</td>
+                            <td>{money(worker.dutyProfit)}</td>
+                            <td>{money(worker.overtimeProfit)}</td>
                             <td
                               className={
                                 worker.companyBilling - worker.labourSalary < 0
@@ -1003,7 +1359,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                             </td>
                           </tr>
                           <tr className={styles["company-worker-rates-row"]}>
-                            <td colSpan="8">
+                            <td colSpan="12">
                               <LabourRateEditor
                                 worker={worker}
                                 onSave={saveWorkerRates}
@@ -1015,7 +1371,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       ))}
                       {!companyOverview.workers.length && (
                         <tr>
-                          <td colSpan="8">
+                          <td colSpan="12">
                             <Empty title="No labour found for this company and zone" />
                           </td>
                         </tr>
@@ -1023,11 +1379,12 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       <tr className={styles["company-detail-total"]}>
                         <th>TOTAL</th>
                         <td />
-                        <td>{companyOverview.totals.attendanceEntries}</td>
+                        <td />
                         <td>{companyOverview.totals.days}</td>
                         <td>{companyOverview.totals.overtimeHours}</td>
-                        <td>{money(companyOverview.totals.companyBilling)}</td>
-                        <td>{money(companyOverview.totals.labourSalary)}</td>
+                        <td colSpan="4" />
+                        <td>{money(companyOverview.totals.dutyProfit)}</td>
+                        <td>{money(companyOverview.totals.overtimeProfit)}</td>
                         <td>{money(companyOverview.totals.margin)}</td>
                       </tr>
                     </tbody>
@@ -1109,7 +1466,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
             <div className={styles["company-zone-group"]}>
               <div>
                 <strong>Zones / cities</strong>
-                <small>Add each zone with its company and labour rate.</small>
+                <small>Add each zone with its company and labour day / overtime rates.</small>
               </div>
               <div className={styles["company-zone-edit-list"]}>
                 {form.zones.map((row, index) => (
@@ -1166,6 +1523,42 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                                 zones: current.zones.map((item, itemIndex) =>
                                   itemIndex === index
                                     ? { ...item, labourDailyRate: event.target.value }
+                                    : item,
+                                ),
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Field label="Company OT (₹/hr)">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={row.overtimeHourlyRate}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                zones: current.zones.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, overtimeHourlyRate: event.target.value }
+                                    : item,
+                                ),
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Field label="Labour OT (₹/hr)">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={row.labourOvertimeRate}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                zones: current.zones.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, labourOvertimeRate: event.target.value }
                                     : item,
                                 ),
                               }))

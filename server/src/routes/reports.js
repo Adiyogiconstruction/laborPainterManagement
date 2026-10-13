@@ -4,6 +4,7 @@ import Attendance from "../models/Attendance.js";
 import Worker from "../models/Worker.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { dateRange } from "../utils/serializers.js";
+import { applyWorkerStatusFilter } from "../utils/workerStatus.js";
 
 const router = Router();
 
@@ -25,15 +26,6 @@ const addWorkerAttributeFilter = (workerFilter, field, value) => {
   if (!value) return;
   workerFilter[field] =
     value === "Unassigned" ? { $in: ["", null] } : value;
-};
-
-const applyWorkerStatusFilter = (workerFilter, status, fallback) => {
-  const selectedStatus = status || fallback;
-  if (!["ACTIVE", "INACTIVE", "ALL"].includes(selectedStatus)) return false;
-  if (selectedStatus !== "ALL") {
-    workerFilter.active = selectedStatus === "ACTIVE";
-  }
-  return true;
 };
 
 router.get(

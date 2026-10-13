@@ -5,6 +5,16 @@ import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { dateRange, pick } from "../utils/serializers.js";
+import { getWorkerLabourStatus } from "../utils/workerStatus.js";
+
+const ensureWorkerCanReceivePayment = async (workerId) => {
+  if (!workerId) return;
+  const worker = await Worker.findById(workerId).select("labourStatus active");
+  if (!worker) throw new ApiError(404, "Worker not found.");
+  if (getWorkerLabourStatus(worker) === "WENT_HOME") {
+    throw new ApiError(400, "Payments cannot be recorded for labour marked Went Home.");
+  }
+};
 
 const router = Router();
 const editable = [
@@ -91,6 +101,7 @@ router.post(
         400,
         "Please specify the other payment type in notes.",
       );
+    await ensureWorkerCanReceivePayment(data.worker);
     const payment = await Payment.create({ ...data, createdBy: req.user.id });
     await payment.populate([{ path: "worker", select: "name type" }]);
     await recordAdminActivity(
@@ -118,6 +129,7 @@ router.patch(
     }
     const nextFlow = updates.flow || payment.flow;
     const nextKind = updates.kind || payment.kind;
+    await ensureWorkerCanReceivePayment(updates.worker || payment.worker);
     if (
       nextFlow === "INFLOW" &&
       !["REFUND", "ADJUSTMENT"].includes(nextKind)
@@ -166,6 +178,7 @@ router.patch(
     if (!payment.deletedAt) {
       throw new ApiError(400, "This payment is not deleted.");
     }
+    await ensureWorkerCanReceivePayment(payment.worker);
     payment.deletedAt = null;
     payment.deletedBy = null;
     await payment.save();

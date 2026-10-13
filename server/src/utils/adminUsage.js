@@ -2,6 +2,54 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const INDIA_OFFSET_MS = 330 * 60 * 1000;
 export const SESSION_HEARTBEAT_TIMEOUT_MS = 15 * 60 * 1000;
 
+export function getUsageDateRange(fromValue, toValue) {
+  const validDate = (value) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().slice(0, 10) === value
+    );
+  };
+  if (!validDate(fromValue) || !validDate(toValue)) {
+    throw new Error("From and to dates must use valid YYYY-MM-DD dates.");
+  }
+  if (fromValue > toValue) {
+    throw new Error("From date must be on or before To date.");
+  }
+  const start = new Date(`${fromValue}T00:00:00.000Z`);
+  const end = new Date(`${toValue}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return {
+    start: new Date(start.getTime() - INDIA_OFFSET_MS),
+    end: new Date(end.getTime() - INDIA_OFFSET_MS),
+  };
+}
+
+export function summarizeAdminUsageByDay(sessions, fromValue, toValue, now) {
+  const from = new Date(`${fromValue}T00:00:00.000Z`);
+  const to = new Date(`${toValue}T00:00:00.000Z`);
+  const rows = [];
+  for (
+    let day = new Date(from);
+    day <= to;
+    day.setUTCDate(day.getUTCDate() + 1)
+  ) {
+    const date = day.toISOString().slice(0, 10);
+    const range = getUsageDateRange(date, date);
+    const summary = summarizeAdminUsage(
+      sessions,
+      range.start,
+      range.end,
+      now,
+    );
+    if (summary.totalMilliseconds > 0) {
+      rows.push({ date, ...summary });
+    }
+  }
+  return rows;
+}
+
 export function currentUsageDate(now = new Date()) {
   return new Date(new Date(now).getTime() + INDIA_OFFSET_MS)
     .toISOString()

@@ -179,6 +179,7 @@ export function SearchBox({
   value,
   onChange,
   placeholder = "Search records…",
+  ariaLabel = placeholder,
 }) {
   return (
     <label className={`${styles["search"]}`}>
@@ -187,6 +188,7 @@ export function SearchBox({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        aria-label={ariaLabel}
       />
     </label>
   );

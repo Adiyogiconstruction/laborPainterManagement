@@ -4,12 +4,26 @@ import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
 import CompanyClient from "../models/CompanyClient.js";
 import CompanyWorkerRate from "../models/CompanyWorkerRate.js";
+import {
+  getCompanyWorkerRates,
+  loadCompanyWorkerRateHistory,
+  upsertWorkerRateHistory,
+  workerRateChangesAtDate,
+} from "../utils/companyWorkerRates.js";
+import {
+  recalculateAttendanceForWorkerRate,
+} from "../utils/workerRateHistory.js";
 import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { parseWorkerSearch } from "../utils/workerSearch.js";
 import { appendWorkerStatusTransition } from "../utils/workerStatusHistory.js";
+import {
+  applyWorkerStatusFilter,
+  getWorkerLabourStatus,
+  workerStatuses,
+} from "../utils/workerStatus.js";
 import { parseLocalDateOnly } from "../utils/localDateRange.js";
 import multer from "multer";
 import {
@@ -47,6 +61,7 @@ const editable = [
   "overtimeHourlyRate",
   "joiningDate",
   "active",
+  "labourStatus",
   "notes",
 ];
 
@@ -71,41 +86,61 @@ const normalizeWorkerFields = (data) => {
   return data;
 };
 
-const syncWorkerSalaryRate = async (worker, userId) => {
-  if (!worker.companyName) return;
-  const company = await CompanyClient.findOne({ name: worker.companyName })
-    .select("_id companyLabourRate")
-    .lean();
-  if (!company) return;
-  const now = new Date();
-  const applicableFrom = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
-  );
-  const existingRate = await CompanyWorkerRate.findOne({
-    company: company._id,
-    worker: worker._id,
-    applicableFrom: { $lte: applicableFrom },
-  })
-    .sort({ applicableFrom: -1 })
-    .lean();
-  await CompanyWorkerRate.updateOne(
-    { company: company._id, worker: worker._id, applicableFrom },
-    {
-      $set: {
-        companyDailyRate:
-          existingRate?.companyDailyRate ?? company.companyLabourRate ?? 0,
-        labourDailyRate: Number(worker.defaultDailyRate || 0),
-        labourOvertimeRate: Number(worker.overtimeHourlyRate || 0),
-      },
-      $setOnInsert: {
+const parseRateApplicableFrom = (value, fallback) => {
+  const dateValue = value || fallback;
+  if (typeof dateValue !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    throw new ApiError(400, "Rate effective date must use YYYY-MM-DD format.");
+  }
+  const date = new Date(`${dateValue}T00:00:00.000Z`);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== dateValue
+  ) {
+    throw new ApiError(400, "Rate effective date is invalid.");
+  }
+  return date;
+};
+
+const syncWorkerSalaryRate = async (
+  worker,
+  applicableFrom,
+  userId,
+  dailyRate,
+  overtimeRate,
+) => {
+  if (worker.companyName) {
+    const company = await CompanyClient.findOne({ name: worker.companyName })
+      .select("_id companyLabourRate")
+      .lean();
+    if (company) {
+      const existingRate = await CompanyWorkerRate.findOne({
         company: company._id,
         worker: worker._id,
-        applicableFrom,
-        createdBy: userId,
-      },
-    },
-    { upsert: true, runValidators: true },
-  );
+        applicableFrom: { $lte: applicableFrom },
+      })
+        .sort({ applicableFrom: -1 })
+        .lean();
+      await CompanyWorkerRate.updateOne(
+        { company: company._id, worker: worker._id, applicableFrom },
+        {
+          $set: {
+            companyDailyRate:
+              existingRate?.companyDailyRate ?? company.companyLabourRate ?? 0,
+            labourDailyRate: dailyRate,
+            labourOvertimeRate: overtimeRate,
+          },
+          $setOnInsert: {
+            company: company._id,
+            worker: worker._id,
+            applicableFrom,
+            createdBy: userId,
+          },
+        },
+        { upsert: true, runValidators: true },
+      );
+    }
+  }
+  await recalculateAttendanceForWorkerRate(worker, applicableFrom, userId);
 };
 
 const validateCompanyZone = async (companyName, workZone) => {
@@ -137,7 +172,11 @@ router.get(
     if (req.query.search) {
       const { status, remaining } = parseWorkerSearch(req.query.search);
 
-      if (status !== undefined) filter.active = status;
+      if (status !== undefined) {
+        if (!applyWorkerStatusFilter(filter, status, "ALL")) {
+          throw new ApiError(400, "Choose a valid labour status.");
+        }
+      }
 
       if (remaining) {
         const escapedSearch = remaining.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -200,6 +239,8 @@ router.get(
         },
       ]),
     );
+    const today = new Date();
+    const rateContext = await loadCompanyWorkerRateHistory(workers, today);
     res.json({
       workers: workers.map((worker) => {
         const totalPayable = payableByWorker.get(String(worker._id)) || 0;
@@ -216,8 +257,11 @@ router.get(
           workerData.aadhaarBackPath = authenticatedImageUrl(
             workerData.aadhaarBackPublicId,
           );
+        const rates = getCompanyWorkerRates(worker, today, rateContext);
         return {
           ...workerData,
+          defaultDailyRate: rates.dailyRate,
+          overtimeHourlyRate: rates.overtimeRate,
           totalPayable,
           totalPaid,
           totalReturned,
@@ -300,18 +344,51 @@ router.post(
       ...pick(req.body, editable),
       type: "LABOUR",
     });
+    if (
+      data.labourStatus !== undefined &&
+      !workerStatuses.includes(data.labourStatus)
+    ) {
+      throw new ApiError(400, "Choose a valid labour status.");
+    }
+    data.labourStatus ||=
+      data.active === false ? "INACTIVE" : "ACTIVE";
+    data.active = data.labourStatus === "ACTIVE";
     if (!data.type || !String(data.name || "").trim() || !String(data.workZone || "").trim()) {
       throw new ApiError(400, "Name and work zone are required.");
     }
     await validateCompanyZone(data.companyName, data.workZone);
     const worker = new Worker(data);
+    const dailyRate = Number(worker.defaultDailyRate || 0);
+    const overtimeRate = Number(worker.overtimeHourlyRate || 0);
+    worker.defaultDailyRate = 0;
+    worker.overtimeHourlyRate = 0;
+    const rateApplicableFrom = parseRateApplicableFrom(
+      req.body.rateApplicableFrom,
+      data.joiningDate
+        ? String(data.joiningDate).slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+    );
+    upsertWorkerRateHistory(
+      worker,
+      rateApplicableFrom,
+      dailyRate,
+      overtimeRate,
+    );
     worker.statusHistory = [
       {
         active: worker.active,
+        labourStatus: worker.labourStatus,
         changedAt: worker.joiningDate,
       },
     ];
     await worker.save();
+    await syncWorkerSalaryRate(
+      worker,
+      rateApplicableFrom,
+      req.user.id,
+      dailyRate,
+      overtimeRate,
+    );
     await recordAdminActivity(
       req,
       "CREATE",
@@ -337,13 +414,81 @@ router.patch(
       throw new ApiError(400, "Name and work zone are required.");
     }
     const updates = normalizeWorkerFields(pick(req.body, editable));
+    if (
+      updates.labourStatus !== undefined &&
+      !workerStatuses.includes(updates.labourStatus)
+    ) {
+      throw new ApiError(400, "Choose a valid labour status.");
+    }
+    if (updates.labourStatus) {
+      updates.active = updates.labourStatus === "ACTIVE";
+    } else if (updates.active !== undefined) {
+      updates.labourStatus = updates.active ? "ACTIVE" : "INACTIVE";
+    }
+    const hasRateInput =
+      updates.defaultDailyRate !== undefined ||
+      updates.overtimeHourlyRate !== undefined;
+    const rateApplicableFrom = hasRateInput
+      ? parseRateApplicableFrom(
+          req.body.rateApplicableFrom,
+          new Date().toISOString().slice(0, 10),
+        )
+      : null;
+    const rateContext = hasRateInput
+      ? await loadCompanyWorkerRateHistory([existing], rateApplicableFrom)
+      : null;
+    const currentRates = rateContext
+      ? getCompanyWorkerRates(existing, rateApplicableFrom, rateContext)
+      : null;
+    const dailyRate = Number(
+      updates.defaultDailyRate ?? currentRates?.dailyRate ?? 0,
+    );
+    const overtimeRate = Number(
+      updates.overtimeHourlyRate ?? currentRates?.overtimeRate ?? 0,
+    );
+    if (
+      hasRateInput &&
+      (!Number.isFinite(dailyRate) ||
+        dailyRate < 0 ||
+        !Number.isFinite(overtimeRate) ||
+        overtimeRate < 0)
+    ) {
+      throw new ApiError(400, "Rates must be valid non-negative amounts.");
+    }
+    const rateChanged =
+      hasRateInput &&
+      workerRateChangesAtDate(
+        existing,
+        rateApplicableFrom,
+        updates.defaultDailyRate,
+        updates.overtimeHourlyRate,
+        rateContext,
+      );
+    if (rateChanged) {
+      if (!existing.rateHistory?.length) {
+        existing.rateHistoryFallbackToZone =
+          Number(existing.defaultDailyRate || 0) === 0;
+      }
+      delete updates.defaultDailyRate;
+      delete updates.overtimeHourlyRate;
+    }
     await validateCompanyZone(
       updates.companyName ?? existing.companyName,
       updates.workZone ?? existing.workZone,
     );
-    const previousStatus = existing.active ?? true;
+    const previousStatus = getWorkerLabourStatus(existing);
     existing.set({ ...updates, type: "LABOUR" });
-    const nextStatus = existing.active ?? true;
+    existing.labourStatus = updates.labourStatus || previousStatus;
+    existing.active = existing.labourStatus === "ACTIVE";
+    if (rateChanged) {
+      upsertWorkerRateHistory(
+        existing,
+        rateApplicableFrom,
+        dailyRate,
+        overtimeRate,
+      );
+    }
+    const nextStatus = getWorkerLabourStatus(existing);
     if (nextStatus !== previousStatus) {
       existing.statusHistory = appendWorkerStatusTransition(
         existing.statusHistory,
@@ -352,16 +497,19 @@ router.patch(
       );
     }
     const worker = await existing.save();
-    if (
-      updates.defaultDailyRate !== undefined ||
-      updates.overtimeHourlyRate !== undefined
-    ) {
-      await syncWorkerSalaryRate(worker, req.user.id);
+    if (rateChanged) {
+      await syncWorkerSalaryRate(
+        worker,
+        rateApplicableFrom,
+        req.user.id,
+        dailyRate,
+        overtimeRate,
+      );
     }
     await recordAdminActivity(
       req,
       "UPDATE",
-      `${req.user.name} updated worker profile for ${worker.name}${nextStatus !== previousStatus ? ` and changed status to ${nextStatus ? "Active" : "Inactive"}` : ""}.`,
+      `${req.user.name} updated worker profile for ${worker.name}${nextStatus !== previousStatus ? ` and changed status to ${nextStatus.replaceAll("_", " ").toLowerCase()}` : ""}.`,
       { workerId: worker.id, section: "workers" },
     );
     res.json({ worker });

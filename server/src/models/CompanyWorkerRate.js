@@ -16,6 +16,7 @@ const companyWorkerRateSchema = new mongoose.Schema(
     },
     applicableFrom: { type: Date, required: true },
     companyDailyRate: { type: Number, min: 0, default: null },
+    companyOvertimeRate: { type: Number, min: 0, default: 0 },
     labourDailyRate: { type: Number, min: 0, required: true },
     labourOvertimeRate: { type: Number, min: 0, required: true },
     createdBy: {

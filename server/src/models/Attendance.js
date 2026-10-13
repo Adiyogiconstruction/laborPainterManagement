@@ -44,6 +44,7 @@ const attendanceSchema = new mongoose.Schema(
     dailyRate: { type: Number, min: 0, default: 0 },
     overtimeRate: { type: Number, min: 0, default: 0 },
     companyDailyRate: { type: Number, min: 0, default: null },
+    companyOvertimeRate: { type: Number, min: 0, default: 0 },
     workZone: { type: String, trim: true, maxlength: 100, default: "" },
     payableAmount: { type: Number, min: 0, default: 0 },
     leaveReason: { type: String, trim: true, maxlength: 250 },

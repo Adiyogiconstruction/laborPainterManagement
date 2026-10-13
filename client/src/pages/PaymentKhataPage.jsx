@@ -94,6 +94,7 @@ function PaymentForm({
   const filteredWorkers = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
     return workers
+      .filter((worker) => worker.labourStatus !== "WENT_HOME")
       .filter((worker) =>
         [worker.name, worker.phone].some((value) =>
           String(value || "")
@@ -439,7 +440,8 @@ export function PaymentKhataPage() {
       (!teamFilter || worker.teamName === teamFilter) &&
       (!zoneFilter || worker.workZone === zoneFilter) &&
       (statusFilter === "ALL" ||
-        (statusFilter === "ACTIVE" ? worker.active : !worker.active)),
+        (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
+          statusFilter),
   );
   const dueCount = accountWorkers.filter(
     (worker) => balanceType(worker) === "DENA_HAI",
@@ -836,6 +838,7 @@ export function PaymentKhataPage() {
                 <option value="ALL">All statuses</option>
                 <option value="ACTIVE">Active labour</option>
                 <option value="INACTIVE">Inactive labour</option>
+                <option value="WENT_HOME">Went Home</option>
               </select>
               <select
                 aria-label="Sort labour accounts"
@@ -1078,6 +1081,11 @@ export function PaymentKhataPage() {
                   </small>
                 </div>
               </div>
+              {selectedWorker.labourStatus === "WENT_HOME" && (
+                <p className={styles["went-home-payment-notice"]}>
+                  Went Home — new payments are disabled for this labour.
+                </p>
+              )}
               <div className={styles["khata-entry-filters"]}>
                 <Field label="Entry type">
                   <select
@@ -1239,6 +1247,7 @@ export function PaymentKhataPage() {
                   icon={ArrowDownLeft}
                   className={styles["button-given"]}
                   onClick={() => setAddingFlow("OUTFLOW")}
+                  disabled={selectedWorker.labourStatus === "WENT_HOME"}
                 >
                   Diya / You Gave
                 </Button>
@@ -1247,6 +1256,7 @@ export function PaymentKhataPage() {
                   icon={ArrowUpRight}
                   className={styles["button-received"]}
                   onClick={() => setAddingFlow("INFLOW")}
+                  disabled={selectedWorker.labourStatus === "WENT_HOME"}
                 >
                   Liya / You Got
                 </Button>

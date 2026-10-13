@@ -14,8 +14,10 @@ import {
 } from "../utils/session.js";
 import {
   currentUsageDate,
+  getUsageDateRange,
   getUsagePeriodRange,
   summarizeAdminUsage,
+  summarizeAdminUsageByDay,
 } from "../utils/adminUsage.js";
 import {
   summarizeAdminActivity,
@@ -381,6 +383,58 @@ router.get(
   requireAuth,
   allowRoles("OWNER"),
   asyncHandler(async (req, res) => {
+    if (req.query.from !== undefined || req.query.to !== undefined) {
+      let range;
+      try {
+        range = getUsageDateRange(
+          String(req.query.from || ""),
+          String(req.query.to || ""),
+        );
+      } catch (error) {
+        throw new ApiError(400, error.message);
+      }
+      const now = new Date();
+      const periodEnd = new Date(Math.min(range.end.getTime(), now.getTime()));
+      const [users, sessions] = await Promise.all([
+        User.find().sort({ createdAt: -1 }),
+        periodEnd > range.start
+          ? AdminSession.find({
+              startedAt: { $lt: periodEnd },
+              expiresAt: { $gt: range.start },
+              $or: [{ endedAt: null }, { endedAt: { $gt: range.start } }],
+            }).select("user startedAt lastSeenAt expiresAt endedAt")
+          : [],
+      ]);
+      const sessionsByUser = new Map();
+      for (const session of sessions) {
+        const key = String(session.user);
+        if (!sessionsByUser.has(key)) sessionsByUser.set(key, []);
+        sessionsByUser.get(key).push(session);
+      }
+      const rows = users.flatMap((user) =>
+        summarizeAdminUsageByDay(
+          sessionsByUser.get(String(user._id)) || [],
+          String(req.query.from),
+          String(req.query.to),
+          now,
+        ).map((summary) => ({
+          userId: user.id,
+          userName: user.name,
+          ...summary,
+        })),
+      ).sort(
+        (left, right) =>
+          left.date.localeCompare(right.date) ||
+          left.userName.localeCompare(right.userName),
+      );
+      res.json({
+        from: String(req.query.from),
+        to: String(req.query.to),
+        rows,
+      });
+      return;
+    }
+
     const period = String(req.query.period || "day");
     const dateValue = req.query.date || currentUsageDate();
     let range;

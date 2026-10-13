@@ -134,8 +134,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
-  .admin-usage-filters > .field:last-of-type {
+  .admin-usage-filters > .field:nth-child(3) {
     grid-column: 1 / -1;
+  }
+  .admin-usage-filter-actions {
+    grid-column: 1 / -1;
+  }
+  .admin-usage-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
   .admin-activity-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -513,6 +520,34 @@
   .company-detail-panel > .panel-header > :first-child {
     width: 100%;
   }
+  .company-report-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .company-report-filters > .field,
+  .company-report-labour-picker {
+    font-size: 9px;
+  }
+  .company-report-filters input,
+  .company-report-filters select,
+  .company-report-picker-trigger {
+    min-height: 32px;
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+  .company-report-filter-actions,
+  .company-report-exports {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+  }
+  .company-report-filter-actions .button,
+  .company-report-exports .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .company-detail-panel .company-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .company-detail-filters {
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -801,7 +836,15 @@
   .dashboard-filters-open .filter-bar {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
+    gap: 8px;
+  }
+  .dashboard-filters-open .filter-bar > .search {
+    grid-column: 1 / -1;
+    min-height: 44px;
+  }
+  .dashboard-filters-open .filter-bar > .search input {
+    min-height: 42px;
+    font-size: 16px;
   }
   .dashboard-filter-panel .filter-bar > .field {
     gap: 3px;
@@ -809,9 +852,9 @@
   }
   .dashboard-filter-panel .filter-bar input,
   .dashboard-filter-panel .filter-bar select {
-    min-height: 29px;
-    padding: 4px 6px;
-    font-size: 10px;
+    min-height: 44px;
+    padding: 7px 8px;
+    font-size: 16px;
   }
   .dashboard-filter-panel .filter-bar input[type="date"] {
     padding-right: 3px;

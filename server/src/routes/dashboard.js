@@ -4,6 +4,7 @@ import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { summarizeDashboardPayments } from "../utils/dashboardPayments.js";
+import { applyWorkerStatusFilter } from "../utils/workerStatus.js";
 
 const router = Router();
 
@@ -139,12 +140,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const type = "LABOUR";
     const workerStatus = req.query.workerStatus || "ACTIVE";
-    if (!["ACTIVE", "INACTIVE", "ALL"].includes(workerStatus)) {
-      return res.status(400).json({ message: "Choose a valid labour status." });
-    }
     const workerFilter = { deletedAt: null, type };
-    if (workerStatus !== "ALL") {
-      workerFilter.active = workerStatus === "ACTIVE";
+    if (!applyWorkerStatusFilter(workerFilter, workerStatus, "ACTIVE")) {
+      return res.status(400).json({ message: "Choose a valid labour status." });
     }
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
       if (req.query[field]) {
@@ -154,9 +152,24 @@ router.get(
             : req.query[field];
       }
     }
+    const search = String(req.query.search || "")
+      .trim()
+      .slice(0, 80);
+    if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const searchPattern = new RegExp(escapedSearch, "i");
+      workerFilter.$or = [
+        { name: searchPattern },
+        { phone: searchPattern },
+        { companyName: searchPattern },
+        { teamName: searchPattern },
+        { workZone: searchPattern },
+        { skill: searchPattern },
+      ];
+    }
     if (req.query.worker) workerFilter._id = req.query.worker;
     const workers = await Worker.find(workerFilter).select(
-      "_id name companyName teamName workZone skill active",
+      "_id name phone companyName teamName workZone skill active labourStatus",
     );
     let range;
     if (req.query.period === "ALL") {
@@ -209,6 +222,7 @@ router.get(
           zone,
           active: 0,
           inactive: 0,
+          wentHome: 0,
           present: 0,
           absent: 0,
           marked: 0,
@@ -226,7 +240,16 @@ router.get(
       const workerId = String(worker._id);
       workerCompany.set(workerId, company);
       workerZone.set(workerId, zone);
-      ensureZoneStats(zone)[worker.active ? "active" : "inactive"] += 1;
+      const workerStatusValue =
+        worker.labourStatus ||
+        (worker.active === false ? "INACTIVE" : "ACTIVE");
+      ensureZoneStats(zone)[
+        workerStatusValue === "WENT_HOME"
+          ? "wentHome"
+          : workerStatusValue === "ACTIVE"
+            ? "active"
+            : "inactive"
+      ] += 1;
       if (!companyStats.has(company)) {
         companyStats.set(company, {
           company,
@@ -253,7 +276,16 @@ router.get(
         { flow: "OUTFLOW", kind: "EXPENSE" },
       ],
     };
-    const inactiveWorkerFilter = { ...workerFilter, active: false };
+    const inactiveWorkerFilter = {
+      ...workerFilter,
+      active: false,
+      labourStatus: { $ne: "WENT_HOME" },
+    };
+    const wentHomeWorkerFilter = {
+      ...workerFilter,
+      active: false,
+      labourStatus: "WENT_HOME",
+    };
     if (req.query.kind) paymentFilter.kind = req.query.kind;
     if (req.query.method) paymentFilter.method = req.query.method;
     const lifetimeAttendanceFilter = { worker: { $in: workerIds } };
@@ -264,6 +296,7 @@ router.get(
       lifetimePayable,
       lifetimePaid,
       inactiveWorkerRows,
+      wentHomeWorkerRows,
     ] =
       await Promise.all([
         Attendance.find(attendanceFilter).select(
@@ -296,10 +329,17 @@ router.get(
         workerStatus === "ACTIVE"
           ? Worker.find(inactiveWorkerFilter).select("_id workZone")
           : [],
+        workerStatus === "ACTIVE"
+          ? Worker.find(wentHomeWorkerFilter).select("_id workZone")
+          : [],
       ]);
     for (const worker of inactiveWorkerRows) {
       const zone = worker.workZone || "Unassigned";
       ensureZoneStats(zone).inactive += 1;
+    }
+    for (const worker of wentHomeWorkerRows) {
+      const zone = worker.workZone || "Unassigned";
+      ensureZoneStats(zone).wentHome += 1;
     }
 
     const dailyAttendance = {};
@@ -461,7 +501,12 @@ router.get(
         zoneStatsForWorker.due += Math.max(0, payable - paid);
       }
     }
-    const expected = workers.length * days;
+    const expected =
+      workers.filter(
+        (worker) =>
+          (worker.labourStatus ||
+            (worker.active === false ? "INACTIVE" : "ACTIVE")) !== "WENT_HOME",
+      ).length * days;
     const present = attendance.filter((item) =>
       ["PRESENT", "DOUBLE_PRESENT", "TRIPLE_PRESENT", "HALF_DAY"].includes(item.status),
     ).length;
@@ -519,10 +564,12 @@ router.get(
             ? item.inactive
             : workerStatus === "ALL"
               ? item.active + item.inactive
-              : item.active) * days;
+              : workerStatus === "WENT_HOME"
+                ? 0
+                : item.active) * days;
         return {
           ...item,
-          labour: item.active + item.inactive,
+          labour: item.active + item.inactive + item.wentHome,
           attendanceRate: expected
             ? Number(((item.present / expected) * 100).toFixed(1))
             : 0,
@@ -541,7 +588,7 @@ router.get(
       })),
       kpis: {
         activeWorkers:
-          workerStatus === "INACTIVE"
+          workerStatus === "INACTIVE" || workerStatus === "WENT_HOME"
             ? 0
             : workerStatus === "ALL"
               ? workers.filter((worker) => worker.active).length
@@ -550,8 +597,23 @@ router.get(
           workerStatus === "ACTIVE"
             ? inactiveWorkerRows.length
             : workerStatus === "ALL"
-              ? workers.filter((worker) => !worker.active).length
-              : workers.length,
+              ? workers.filter(
+                  (worker) =>
+                    !worker.active && worker.labourStatus !== "WENT_HOME",
+                ).length
+              : workerStatus === "INACTIVE"
+                ? workers.length
+                : 0,
+        wentHomeWorkers:
+          workerStatus === "ACTIVE"
+            ? wentHomeWorkerRows.length
+            : workerStatus === "ALL"
+              ? workers.filter(
+                  (worker) => worker.labourStatus === "WENT_HOME",
+                ).length
+              : workerStatus === "WENT_HOME"
+                ? workers.length
+                : 0,
         attendanceRate: expected
           ? Number(((present / expected) * 100).toFixed(1))
           : 0,

@@ -38,12 +38,31 @@ const workerSchema = new mongoose.Schema(
     ppeKitIssuedOn: { type: Date, default: null },
     defaultDailyRate: { type: Number, min: 0, default: 0 },
     overtimeHourlyRate: { type: Number, min: 0, default: 0 },
+    rateHistory: {
+      type: [
+        {
+          applicableFrom: { type: Date, required: true },
+          dailyRate: { type: Number, min: 0, required: true },
+          overtimeRate: { type: Number, min: 0, required: true },
+        },
+      ],
+      default: [],
+    },
+    rateHistoryFallbackToZone: { type: Boolean, default: false },
     joiningDate: { type: Date, default: null },
+    labourStatus: {
+      type: String,
+      enum: ["ACTIVE", "INACTIVE", "WENT_HOME"],
+    },
     active: { type: Boolean, default: true },
     statusHistory: {
       type: [
         {
           active: { type: Boolean, required: true },
+          labourStatus: {
+            type: String,
+            enum: ["ACTIVE", "INACTIVE", "WENT_HOME"],
+          },
           changedAt: { type: Date, default: null },
         },
       ],

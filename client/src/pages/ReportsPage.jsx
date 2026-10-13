@@ -373,7 +373,9 @@ export function ReportsPage() {
               ? "Active"
               : workerStatus === "INACTIVE"
                 ? "Inactive"
-                : "All"}
+                : workerStatus === "WENT_HOME"
+                  ? "Went Home"
+                  : "All"}
           </span>
           <span>
             <strong>Period</strong> {date(`${from}T00:00:00`)} –{" "}
@@ -439,6 +441,7 @@ export function ReportsPage() {
             >
               <option value="ACTIVE">Active labour</option>
               <option value="INACTIVE">Inactive labour</option>
+              <option value="WENT_HOME">Went Home</option>
               <option value="ALL">All labour</option>
             </select>
           </Field>
@@ -895,6 +898,8 @@ export function ReportsPage() {
                     ? "Active workers"
                     : workerStatus === "INACTIVE"
                       ? "Inactive workers"
+                      : workerStatus === "WENT_HOME"
+                        ? "Went Home workers"
                       : "Matching workers"}
                 </span>
                 <strong>

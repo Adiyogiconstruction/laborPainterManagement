@@ -26,7 +26,7 @@
 }
 .admin-usage-filters {
   display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
   align-items: end;
   gap: 10px;
   margin-bottom: 12px;
@@ -40,11 +40,27 @@
 .admin-usage-filters select {
   width: 100%;
 }
-.admin-usage-filters > p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
+.admin-usage-filter-actions,
+.admin-usage-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-usage-filter-actions {
+  min-height: 38px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.admin-usage-actions {
+  flex: 0 0 auto;
+}
+.admin-usage-filters .button {
+  min-height: 38px;
+}
+.admin-usage-panel tfoot th {
+  background: #f6f8f7;
+  color: #243532;
+  font-weight: 800;
 }
 .admin-activity-filters {
   display: grid;
@@ -791,6 +807,16 @@
 .workforce-list-panel .table-wrap tbody tr.worker-inactive strong {
   color: #75484a;
 }
+.workforce-list-panel .table-wrap tbody tr.worker-went-home {
+  background: #fffaf0;
+  box-shadow: inset 3px 0 0 #d7991d;
+}
+.workforce-list-panel .table-wrap tbody tr.worker-went-home:hover {
+  background: #fff3d8;
+}
+.workforce-list-panel .table-wrap tbody tr.worker-went-home strong {
+  color: #795c20;
+}
 .workforce-pagination {
   display: flex;
   align-items: center;
@@ -1327,6 +1353,16 @@
   font-size: 10px;
   font-weight: 800;
 }
+.went-home-payment-notice {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #efdcae;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #795c20;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .button-whatsapp {
   background: #e8f7ee;
   color: #168148;
@@ -1845,6 +1881,12 @@
 }
 .monthly-cell:disabled {
   cursor: not-allowed;
+}
+.monthly-cell.monthly-went-home:disabled {
+  border-color: #e6c77f;
+  background: #fff6df;
+  color: #8a6418;
+  opacity: 1;
 }
 .monthly-present {
   border-color: #9ed7c0;
