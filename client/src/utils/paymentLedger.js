@@ -62,7 +62,13 @@ export function filterAndSortWorkers(
 export function paymentBalances(payments, currentBalance) {
   let balance = Number(currentBalance || 0);
   return [...payments]
-    .sort((left, right) => new Date(right.paidOn) - new Date(left.paidOn))
+    .sort(
+      (left, right) =>
+        new Date(right.paidOn) - new Date(left.paidOn) ||
+        new Date(right.createdAt || right.paidOn) -
+          new Date(left.createdAt || left.paidOn) ||
+        String(right._id || "").localeCompare(String(left._id || "")),
+    )
     .map((payment) => {
       const balanceAfter = balance;
       balance +=

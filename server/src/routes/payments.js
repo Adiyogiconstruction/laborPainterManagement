@@ -28,6 +28,25 @@ const editable = [
   "notes",
 ];
 
+const getPagination = (query) => {
+  const limit =
+    query.limit === undefined || query.limit === ""
+      ? 100
+      : Number(query.limit);
+  const skip =
+    query.skip === undefined || query.skip === "" ? 0 : Number(query.skip);
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > 500 ||
+    !Number.isSafeInteger(skip) ||
+    skip < 0
+  ) {
+    throw new ApiError(400, "Invalid payment pagination values.");
+  }
+  return { limit, skip };
+};
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
@@ -58,16 +77,11 @@ router.get(
     }
     const range = dateRange(req.query);
     if (range) filter.paidOn = range;
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const requestedSkip = Number(req.query.skip);
-    const skip =
-      Number.isSafeInteger(requestedSkip) && requestedSkip > 0
-        ? requestedSkip
-        : 0;
+    const { limit, skip } = getPagination(req.query);
     const [payments, total] = await Promise.all([
       Payment.find(filter)
         .populate("worker", "name type")
-        .sort({ paidOn: -1, createdAt: -1 })
+        .sort({ paidOn: -1, createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit),
       Payment.countDocuments(filter),
@@ -160,12 +174,18 @@ router.patch(
 router.get(
   "/deleted",
   allowRoles("OWNER", "ADMIN"),
-  asyncHandler(async (_req, res) => {
-    const payments = await Payment.find({ deletedAt: { $ne: null } })
+  asyncHandler(async (req, res) => {
+    const filter = { deletedAt: { $ne: null } };
+    const { limit, skip } = getPagination(req.query);
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
       .populate("worker", "name type")
-      .sort({ deletedAt: -1, updatedAt: -1 })
-      .limit(200);
-    res.json({ payments });
+        .sort({ deletedAt: -1, updatedAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit),
+      Payment.countDocuments(filter),
+    ]);
+    res.json({ payments, total });
   }),
 );
 
@@ -178,7 +198,6 @@ router.patch(
     if (!payment.deletedAt) {
       throw new ApiError(400, "This payment is not deleted.");
     }
-    await ensureWorkerCanReceivePayment(payment.worker);
     payment.deletedAt = null;
     payment.deletedBy = null;
     await payment.save();

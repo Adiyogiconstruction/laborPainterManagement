@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -9,6 +9,7 @@ import {
   FileDown,
   MessageCircle,
   Pencil,
+  RefreshCw,
   Settings2,
   Trash2,
 } from "lucide-react";
@@ -37,6 +38,15 @@ import {
   notifyPaymentDataChanged,
   subscribeToPaymentChanges,
 } from "../utils/paymentEvents.js";
+import { fetchAllPages } from "../utils/fetchAllPages.js";
+
+const loadAllPayments = (params = {}, endpoint = "/payments") =>
+  fetchAllPages(async (skip, limit) => {
+    const { payments, total } = await request(
+      api.get(endpoint, { params: { ...params, limit, skip } }),
+    );
+    return { items: payments, total };
+  });
 
 const paymentColumns = [
   ["Date", "date"],
@@ -343,9 +353,11 @@ export function PaymentKhataPage() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [error, setError] = useState("");
   const [loadingWorkers, setLoadingWorkers] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const paymentsRequestId = useRef(0);
+  const refreshInProgress = useRef(false);
 
-  const loadWorkers = async () => {
-    setError("");
+  const loadWorkers = useCallback(async () => {
     try {
       const { workers: result } = await request(
         api.get("/workers", { params: { type: "LABOUR" } }),
@@ -361,43 +373,86 @@ export function PaymentKhataPage() {
     } finally {
       setLoadingWorkers(false);
     }
-  };
-  const loadPayments = async () => {
-    if (!selectedWorkerId) {
+  }, []);
+  const loadPayments = useCallback(async (workerId = selectedWorkerId) => {
+    const requestId = ++paymentsRequestId.current;
+    if (!workerId) {
       setPayments([]);
       return;
     }
     try {
-      const { payments: result } = await request(
-        api.get("/payments", {
-          params: {
-            worker: selectedWorkerId,
-            limit: 500,
-          },
-        }),
-      );
-      setPayments(result || []);
+      const result = await loadAllPayments({ worker: workerId });
+      if (requestId === paymentsRequestId.current) setPayments(result);
+    } catch (err) {
+      if (requestId === paymentsRequestId.current) {
+        setError(errorMessage(err));
+      }
+    }
+  }, [selectedWorkerId]);
+  const loadDeletedPayments = useCallback(async () => {
+    try {
+      const result = await loadAllPayments({}, "/payments/deleted");
+      setDeletedPayments(result);
     } catch (err) {
       setError(errorMessage(err));
     }
-  };
-  useEffect(() => {
-    loadWorkers();
+  }, []);
+  const loadMasterReport = useCallback(async () => {
+    setReportLoading(true);
+    setReportError("");
+    try {
+      const allPayments = await loadAllPayments();
+      setReportPayments(allPayments);
+      setReportOpen(true);
+    } catch (err) {
+      setReportError(errorMessage(err));
+    } finally {
+      setReportLoading(false);
+    }
   }, []);
   useEffect(() => {
+    loadWorkers();
+  }, [loadWorkers]);
+  useEffect(() => {
     loadPayments();
-  }, [selectedWorkerId]);
-  useEffect(
-    () =>
-      subscribeToPaymentChanges((source) => {
-        if (source !== "remote") return;
-        loadWorkers();
-        loadPayments();
-        if (showRecycleBin) loadDeletedPayments();
-        if (reportOpen) loadMasterReport();
-      }),
-    [showRecycleBin, reportOpen],
-  );
+  }, [loadPayments]);
+  const refreshPaymentData = useCallback(async () => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    setRefreshing(true);
+    setError("");
+    try {
+      await Promise.all([loadWorkers(), loadPayments()]);
+      if (showRecycleBin) await loadDeletedPayments();
+      if (reportOpen) await loadMasterReport();
+    } finally {
+      refreshInProgress.current = false;
+      setRefreshing(false);
+    }
+  }, [
+    loadWorkers,
+    loadPayments,
+    showRecycleBin,
+    loadDeletedPayments,
+    loadMasterReport,
+  ]);
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshPaymentData();
+    };
+    const unsubscribe = subscribeToPaymentChanges((source) => {
+      if (source === "remote") refreshWhenVisible();
+    });
+    const intervalId = window.setInterval(refreshWhenVisible, 60_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      unsubscribe();
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshPaymentData]);
   useEffect(() => {
     if (showRecycleBin) {
       recycleBinRef.current?.scrollIntoView({
@@ -530,8 +585,10 @@ export function PaymentKhataPage() {
       })
       .sort((left, right) => {
         const dateDifference =
+          new Date(left.paidOn).getTime() - new Date(right.paidOn).getTime() ||
           new Date(left.createdAt || left.paidOn).getTime() -
-          new Date(right.createdAt || right.paidOn).getTime();
+            new Date(right.createdAt || right.paidOn).getTime() ||
+          String(left._id).localeCompare(String(right._id));
         return reportSort === "OLDEST" ? dateDifference : -dateDifference;
       });
   }, [reportPayments, reportFrom, reportTo, reportSearch, reportSort]);
@@ -542,42 +599,6 @@ export function PaymentKhataPage() {
     .filter((payment) => payment.flow === "INFLOW")
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const reportNet = reportGiven - reportReceived;
-  const loadMasterReport = async () => {
-    setReportLoading(true);
-    setReportError("");
-    try {
-      const firstPage = await request(
-        api.get("/payments", { params: { limit: 500, skip: 0 } }),
-      );
-      const allPayments = [...(firstPage.payments || [])];
-      for (let start = 500; start < firstPage.total; start += 5000) {
-        const pageRequests = [];
-        const batchEnd = Math.min(start + 5000, firstPage.total);
-        for (let skip = start; skip < batchEnd; skip += 500) {
-          pageRequests.push(
-            request(api.get("/payments", { params: { limit: 500, skip } })),
-          );
-        }
-        const pages = await Promise.all(pageRequests);
-        pages.forEach(({ payments = [] }) => allPayments.push(...payments));
-      }
-      setReportPayments(allPayments);
-      setReportOpen(true);
-    } catch (err) {
-      setReportError(errorMessage(err));
-    } finally {
-      setReportLoading(false);
-    }
-  };
-
-  const loadDeletedPayments = async () => {
-    try {
-      const { payments: result } = await request(api.get("/payments/deleted"));
-      setDeletedPayments(result || []);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  };
   const completePaymentSave = async () => {
     setAddingFlow("");
     setEditing(null);
@@ -750,17 +771,28 @@ export function PaymentKhataPage() {
         className={styles["payment-page-header"]}
         title="Labour Payment Khata"
         action={
-          <Button
-            type="button"
-            icon={Trash2}
-            className={styles["button-secondary"]}
-            onClick={() => {
-              setShowRecycleBin((current) => !current);
-              if (!showRecycleBin) loadDeletedPayments();
-            }}
-          >
-            Recycle bin
-          </Button>
+          <div className={styles["actions-inline"]}>
+            <Button
+              type="button"
+              icon={RefreshCw}
+              className={styles["button-secondary"]}
+              onClick={refreshPaymentData}
+              loading={refreshing}
+            >
+              Refresh
+            </Button>
+            <Button
+              type="button"
+              icon={Trash2}
+              className={styles["button-secondary"]}
+              onClick={() => {
+                setShowRecycleBin((current) => !current);
+                if (!showRecycleBin) loadDeletedPayments();
+              }}
+            >
+              Recycle bin
+            </Button>
+          </div>
         }
       />
       <div

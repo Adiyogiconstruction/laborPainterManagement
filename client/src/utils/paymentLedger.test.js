@@ -129,6 +129,36 @@ test("running balances reverse receipts and payouts from positive or negative ba
   );
 });
 
+test("same-day ledger entries use creation time for a deterministic balance order", () => {
+  const rows = paymentBalances(
+    [
+      {
+        _id: "earlier",
+        flow: "OUTFLOW",
+        amount: 100,
+        paidOn: "2026-10-13",
+        createdAt: "2026-10-13T09:00:00.000Z",
+      },
+      {
+        _id: "later",
+        flow: "INFLOW",
+        amount: 25,
+        paidOn: "2026-10-13",
+        createdAt: "2026-10-13T10:00:00.000Z",
+      },
+    ],
+    75,
+  );
+
+  assert.deepEqual(
+    rows.map(({ _id, balanceAfter }) => [_id, balanceAfter]),
+    [
+      ["later", 75],
+      ["earlier", 50],
+    ],
+  );
+});
+
 test("CSV parser handles escaped quotes, commas, CRLF, and rejects unclosed fields", () => {
   assert.deepEqual(parseCsv('Name,Notes\r\n"A, B","He said ""yes"""'), [
     ["Name", "Notes"],
