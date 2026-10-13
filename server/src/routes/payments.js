@@ -48,11 +48,21 @@ router.get(
     }
     const range = dateRange(req.query);
     if (range) filter.paidOn = range;
-    const payments = await Payment.find(filter)
-      .populate("worker", "name type")
-      .sort({ paidOn: -1, createdAt: -1 })
-      .limit(Math.min(Number(req.query.limit) || 100, 500));
-    res.json({ payments });
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const requestedSkip = Number(req.query.skip);
+    const skip =
+      Number.isSafeInteger(requestedSkip) && requestedSkip > 0
+        ? requestedSkip
+        : 0;
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
+        .populate("worker", "name type")
+        .sort({ paidOn: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Payment.countDocuments(filter),
+    ]);
+    res.json({ payments, total });
   }),
 );
 
@@ -120,13 +130,18 @@ router.patch(
     payment.set(updates);
     await payment.save();
     await payment.populate([{ path: "worker", select: "name type" }]);
-    await recordAdminActivity(
+    res.json({ payment });
+    void recordAdminActivity(
       req,
       "UPDATE",
       `${req.user.name} updated a ${payment.flow === "INFLOW" ? "received" : "paid"} payment of ${payment.amount} for ${payment.worker?.name || "a worker"}.`,
       { paymentId: payment.id, section: "payments" },
-    );
-    res.json({ payment });
+    ).catch((error) => {
+      console.error(
+        "Payment update succeeded, but its admin activity record could not be saved.",
+        error,
+      );
+    });
   }),
 );
 
@@ -161,6 +176,29 @@ router.patch(
       { paymentId: payment.id, section: "payments", restored: true },
     );
     res.json({ payment });
+  }),
+);
+
+router.delete(
+  "/:id/permanent",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) throw new ApiError(404, "Payment not found.");
+    if (!payment.deletedAt) {
+      throw new ApiError(
+        400,
+        "This payment is not in the recycle bin and cannot be permanently deleted.",
+      );
+    }
+    await Payment.findByIdAndDelete(payment._id);
+    await recordAdminActivity(
+      req,
+      "DELETE",
+      `${req.user.name} permanently deleted a payment record.`,
+      { paymentId: payment.id, section: "payments", permanent: true },
+    );
+    res.json({ deletedId: payment.id });
   }),
 );
 

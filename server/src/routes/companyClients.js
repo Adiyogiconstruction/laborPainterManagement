@@ -426,11 +426,6 @@ router.get(
       deletedAt: null,
       type: "LABOUR",
     };
-    if (req.query.zone === "Unassigned") {
-      workerFilter.workZone = { $in: ["", null] };
-    } else if (req.query.zone) {
-      workerFilter.workZone = String(req.query.zone);
-    }
     const [allWorkers, zones] = await Promise.all([
       Worker.find(workerFilter)
         .select("_id name workZone active companyName defaultDailyRate overtimeHourlyRate")
@@ -463,19 +458,67 @@ router.get(
       if (!zoneRatesByName.has(key)) zoneRatesByName.set(key, []);
       zoneRatesByName.get(key).push(rate);
     }
-    const workerIds = allWorkers.map((worker) => worker._id);
-    const workersById = new Map(
-      allWorkers.map((worker) => [String(worker._id), worker]),
-    );
-    const attendance = workerIds.length
-      ? await Attendance.find({
-          worker: { $in: workerIds },
-          date: { $gte: rangeStart, $lt: rangeEnd },
+    const currentWorkerIds = allWorkers.map((worker) => worker._id);
+    const attendance = await Attendance.find({
+      date: { $gte: rangeStart, $lt: rangeEnd },
+      $or: [
+        { company: company._id },
+        { companyName: company.name },
+        {
+          company: { $exists: false },
+          companyName: { $exists: false },
+          worker: { $in: currentWorkerIds },
+        },
+        {
+          company: null,
+          companyName: "",
+          worker: { $in: currentWorkerIds },
+        },
+      ],
+    })
+      .select("worker company companyName date status workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate workZone")
+      .sort({ date: 1 })
+      .lean();
+    const attendanceWorkerIds = [
+      ...new Set(attendance.map((record) => String(record.worker))),
+    ];
+    const historicalWorkers = attendanceWorkerIds.length
+      ? await Worker.find({
+          _id: { $in: attendanceWorkerIds },
+          deletedAt: null,
+          type: "LABOUR",
         })
-          .select("worker date status workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate workZone")
-          .sort({ date: 1 })
+          .select("_id name workZone active companyName defaultDailyRate overtimeHourlyRate")
           .lean()
       : [];
+    const workerById = new Map(
+      [...allWorkers, ...historicalWorkers].map((worker) => [
+        String(worker._id),
+        worker,
+      ]),
+    );
+    const zoneMatches = (zone) =>
+      !req.query.zone ||
+      (req.query.zone === "Unassigned"
+        ? !String(zone || "").trim()
+        : normalizeZoneKey(zone) === normalizeZoneKey(req.query.zone));
+    const includedWorkerIds = new Set(
+      allWorkers
+        .filter((worker) => zoneMatches(worker.workZone))
+        .map((worker) => String(worker._id)),
+    );
+    for (const record of attendance) {
+      const worker = workerById.get(String(record.worker));
+      if (worker && zoneMatches(record.workZone || worker.workZone)) {
+        includedWorkerIds.add(String(worker._id));
+      }
+    }
+    const visibleWorkers = [...includedWorkerIds]
+      .map((workerId) => workerById.get(workerId))
+      .filter(Boolean)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const workersById = workerById;
+    const workerIds = [...workerById.keys()];
     const rateHistory = workerIds.length
       ? await CompanyWorkerRate.find({
           company: company._id,
@@ -492,18 +535,33 @@ router.get(
       ratesByWorker.get(key).push(rate);
     }
     const statsByWorker = new Map(
-      allWorkers.map((worker) => [
+      visibleWorkers.map((worker) => [
         String(worker._id),
-        { days: 0, overtimeHours: 0, companyBilling: 0, labourSalary: 0 },
+        {
+          attendanceEntries: 0,
+          days: 0,
+          overtimeHours: 0,
+          companyBilling: 0,
+          labourSalary: 0,
+        },
       ]),
     );
+    const zonesByWorker = new Map();
     for (const record of attendance) {
       const worker = workersById.get(String(record.worker));
       if (!worker) continue;
+      if (!zoneMatches(record.workZone || worker.workZone)) continue;
       const stats = statsByWorker.get(String(record.worker));
+      if (!stats) continue;
       const workUnits = Number(record.workUnits || 0);
       const overtimeHours = Number(record.overtimeHours || 0);
       const attendanceZone = record.workZone || worker.workZone;
+      if (attendanceZone) {
+        if (!zonesByWorker.has(String(record.worker))) {
+          zonesByWorker.set(String(record.worker), new Set());
+        }
+        zonesByWorker.get(String(record.worker)).add(attendanceZone);
+      }
       const zoneRate = getEffectiveZoneRateRecord(
         zoneRatesByName.get(normalizeZoneKey(attendanceZone)) || [],
         record.date,
@@ -515,10 +573,13 @@ router.get(
         worker,
         zoneRate,
       );
+      stats.attendanceEntries += 1;
       if (workUnits > 0) stats.days += 1;
       stats.overtimeHours += overtimeHours;
       stats.companyBilling +=
-        Number(record.companyDailyRate ?? zoneRate ?? rates.companyDailyRate) *
+        Number(
+          record.companyDailyRate ?? zoneRate?.dailyRate ?? rates.companyDailyRate,
+        ) *
         workUnits;
       stats.labourSalary += Number(
         record.payableAmount ??
@@ -529,19 +590,29 @@ router.get(
     }
     const totals = [...statsByWorker.values()].reduce(
       (result, stats) => ({
+        attendanceEntries: result.attendanceEntries + stats.attendanceEntries,
         days: result.days + stats.days,
         overtimeHours: result.overtimeHours + stats.overtimeHours,
         companyBilling: result.companyBilling + stats.companyBilling,
         labourSalary: result.labourSalary + stats.labourSalary,
       }),
-      { days: 0, overtimeHours: 0, companyBilling: 0, labourSalary: 0 },
+      {
+        attendanceEntries: 0,
+        days: 0,
+        overtimeHours: 0,
+        companyBilling: 0,
+        labourSalary: 0,
+      },
     );
-    const workers = allWorkers
+    const workers = visibleWorkers
       .slice((page - 1) * pageSize, page * pageSize)
       .map((worker) => ({
         id: worker._id,
         name: worker.name,
-        zone: worker.workZone || "Unassigned",
+        zone:
+          [...(zonesByWorker.get(String(worker._id)) || [])].join(", ") ||
+          worker.workZone ||
+          "Unassigned",
         active: worker.active,
         ...statsByWorker.get(String(worker._id)),
         rates: {
@@ -591,7 +662,11 @@ router.get(
       },
       month,
       zone: String(req.query.zone || ""),
-      zones: [...new Set([...zoneNames, ...zones.map((zone) => zone || "Unassigned")])].sort(
+      zones: [...new Set([
+        ...zoneNames,
+        ...zones.map((zone) => zone || "Unassigned"),
+        ...attendance.map((record) => record.workZone || "Unassigned"),
+      ])].sort(
         (left, right) => left.localeCompare(right),
       ),
       totals: { ...totals, margin },
@@ -599,8 +674,8 @@ router.get(
       pagination: {
         page,
         pageSize,
-        total: allWorkers.length,
-        pages: Math.max(1, Math.ceil(allWorkers.length / pageSize)),
+        total: visibleWorkers.length,
+        pages: Math.max(1, Math.ceil(visibleWorkers.length / pageSize)),
       },
     });
   }),

@@ -73,6 +73,42 @@ test("statement PDF paginates the complete transaction list", () => {
   assert.ok(doc.internal.getNumberOfPages() > 1);
 });
 
+test("labour khata PDFs support account and master transaction layouts", () => {
+  const accountDoc = createTransactionStatementPdf({
+    profile,
+    from: "2026-09-01",
+    to: "2026-09-30",
+    payments: payments.map((payment) => ({
+      ...payment,
+      balanceAfter: 1600,
+    })),
+    title: "LABOUR PAYMENT KHATA",
+    subtitle: "Worker One · 9000000000 · North zone",
+    includeWorker: false,
+    includeBalance: true,
+    balanceValue: 1600,
+    balanceLabel: "CURRENT BALANCE",
+  });
+  const masterDoc = createTransactionStatementPdf({
+    profile,
+    from: "2026-09-01",
+    to: "2026-09-30",
+    payments: payments.map((payment) => ({
+      ...payment,
+      balanceAfter: 1600,
+    })),
+    title: "ALL LABOUR TRANSACTIONS",
+    orientation: "landscape",
+    includeWorker: true,
+    includeBalance: true,
+  });
+
+  assert.ok(Math.abs(accountDoc.internal.pageSize.getWidth() - 210) < 0.01);
+  assert.ok(Math.abs(masterDoc.internal.pageSize.getWidth() - 297) < 0.01);
+  assert.ok(accountDoc.output("arraybuffer").byteLength > 0);
+  assert.ok(masterDoc.output("arraybuffer").byteLength > 0);
+});
+
 test("statement PDF rejects missing company identity and invalid transactions", () => {
   assert.throws(
     () =>

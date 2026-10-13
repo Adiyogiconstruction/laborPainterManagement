@@ -138,7 +138,14 @@ router.get(
   "/analytics",
   asyncHandler(async (req, res) => {
     const type = "LABOUR";
-    const workerFilter = { active: true, deletedAt: null, type };
+    const workerStatus = req.query.workerStatus || "ACTIVE";
+    if (!["ACTIVE", "INACTIVE", "ALL"].includes(workerStatus)) {
+      return res.status(400).json({ message: "Choose a valid labour status." });
+    }
+    const workerFilter = { deletedAt: null, type };
+    if (workerStatus !== "ALL") {
+      workerFilter.active = workerStatus === "ACTIVE";
+    }
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
       if (req.query[field]) {
         workerFilter[field] =
@@ -149,7 +156,7 @@ router.get(
     }
     if (req.query.worker) workerFilter._id = req.query.worker;
     const workers = await Worker.find(workerFilter).select(
-      "_id name companyName teamName workZone skill",
+      "_id name companyName teamName workZone skill active",
     );
     let range;
     if (req.query.period === "ALL") {
@@ -219,7 +226,7 @@ router.get(
       const workerId = String(worker._id);
       workerCompany.set(workerId, company);
       workerZone.set(workerId, zone);
-      ensureZoneStats(zone).active += 1;
+      ensureZoneStats(zone)[worker.active ? "active" : "inactive"] += 1;
       if (!companyStats.has(company)) {
         companyStats.set(company, {
           company,
@@ -286,7 +293,9 @@ router.get(
             },
           },
         ]),
-        Worker.find(inactiveWorkerFilter).select("_id workZone"),
+        workerStatus === "ACTIVE"
+          ? Worker.find(inactiveWorkerFilter).select("_id workZone")
+          : [],
       ]);
     for (const worker of inactiveWorkerRows) {
       const zone = worker.workZone || "Unassigned";
@@ -505,7 +514,12 @@ router.get(
       );
     const zoneSummary = [...zoneStats.values()]
       .map((item) => {
-        const expected = item.active * days;
+        const expected =
+          (workerStatus === "INACTIVE"
+            ? item.inactive
+            : workerStatus === "ALL"
+              ? item.active + item.inactive
+              : item.active) * days;
         return {
           ...item,
           labour: item.active + item.inactive,
@@ -526,8 +540,18 @@ router.get(
         name: worker.name,
       })),
       kpis: {
-        activeWorkers: workers.length,
-        inactiveWorkers: inactiveWorkerRows.length,
+        activeWorkers:
+          workerStatus === "INACTIVE"
+            ? 0
+            : workerStatus === "ALL"
+              ? workers.filter((worker) => worker.active).length
+              : workers.length,
+        inactiveWorkers:
+          workerStatus === "ACTIVE"
+            ? inactiveWorkerRows.length
+            : workerStatus === "ALL"
+              ? workers.filter((worker) => !worker.active).length
+              : workers.length,
         attendanceRate: expected
           ? Number(((present / expected) * 100).toFixed(1))
           : 0,

@@ -27,6 +27,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
+import { subscribeToPaymentChanges } from "../utils/paymentEvents.js";
 import companyLogo from "../assets/image.png";
 import { BulkWorkerUploadModal } from "../components/BulkWorkerUploadModal.jsx";
 import "@fontsource/noto-sans-devanagari/400.css";
@@ -690,28 +691,37 @@ function WorkerHistory({ worker, onClose }) {
     : [];
   useEffect(() => {
     let active = true;
-    setHistoryLoading(true);
-    setError("");
-    request(
-      api.get(`/workers/${worker._id}/history`, {
-        params: {
-          ...(allTime ? {} : period),
-          attendancePage,
-          attendanceLimit,
-        },
-      }),
-    )
-      .then((historyData) => {
-        if (active) setData(historyData);
-      })
-      .catch((err) => {
-        if (active) setError(errorMessage(err));
-      })
-      .finally(() => {
-        if (active) setHistoryLoading(false);
-      });
+    let requestSequence = 0;
+    const loadHistory = () => {
+      const sequence = ++requestSequence;
+      setHistoryLoading(true);
+      setError("");
+      request(
+        api.get(`/workers/${worker._id}/history`, {
+          params: {
+            ...(allTime ? {} : period),
+            attendancePage,
+            attendanceLimit,
+          },
+        }),
+      )
+        .then((historyData) => {
+          if (active && sequence === requestSequence) setData(historyData);
+        })
+        .catch((err) => {
+          if (active && sequence === requestSequence) {
+            setError(errorMessage(err));
+          }
+        })
+        .finally(() => {
+          if (active && sequence === requestSequence) setHistoryLoading(false);
+        });
+    };
+    loadHistory();
+    const unsubscribeFromPaymentChanges = subscribeToPaymentChanges(loadHistory);
     return () => {
       active = false;
+      unsubscribeFromPaymentChanges();
     };
   }, [worker._id, period, allTime, attendancePage]);
   useEffect(() => {

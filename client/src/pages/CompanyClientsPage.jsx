@@ -699,7 +699,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       {isOwner && (
         <Panel
           title="Manual labour assignment summary"
-          detail={`${periodLabel(profitPeriod)} · ${rangeLabel(profitRange)} · Based on labour supply records entered with Track labour.`}
+          detail={`${periodLabel(profitPeriod)} · ${rangeLabel(profitRange)} · Contract/headcount margin from Track labour assignments; attendance is not used, so it can include assigned labour-days even when attendance is absent or not entered.`}
           className={styles["company-profit-panel"]}
         >
           {profitError ? (
@@ -876,10 +876,10 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
           title={
             <span className={styles["company-detail-heading"]}>
               <BarChart3 size={16} />
-              Company labour and margin
+              Attendance-based labour profit
             </span>
           }
-          detail="Company billing uses the rate for the worker’s zone; labour salary uses that worker’s saved rate. Expenses are excluded."
+          detail="Owner-only actual attendance calculation: company billing minus saved labour salary, grouped by the company assigned on the labour profile when attendance was marked. Expenses are excluded."
           className={styles["company-detail-panel"]}
           action={
             <div className={styles["company-detail-filters"]}>
@@ -953,15 +953,16 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                 ))}
               </div>
               <div className={styles["company-detail-breakdown"]}>
-                <h3>Attendance-based margin breakdown</h3>
+                <h3>Actual attendance-based labour margin</h3>
                 <p>
-                  {detailMonth} · {detailZone || "All zones"} · Rates apply from their effective date; existing attendance salary rates remain unchanged.
+                  {detailMonth} · {detailZone || "All zones"} · Only saved attendance is included; absent/zero-work entries have no company billing, and missing attendance is not assumed to mean absent. Company attribution is saved from the labour profile when attendance is recorded. Expenses are excluded.
                 </p>
                 <div className={styles["table-wrap"]}>
                   <table className={styles["company-detail-table"]}>
                     <colgroup>
                       <col className={styles["company-detail-col-labour"]} />
                       <col className={styles["company-detail-col-zone"]} />
+                      <col className={styles["company-detail-col-days"]} />
                       <col className={styles["company-detail-col-days"]} />
                       <col className={styles["company-detail-col-overtime"]} />
                       <col className={styles["company-detail-col-money"]} />
@@ -972,6 +973,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       <tr>
                         <th>Labour</th>
                         <th>Zone</th>
+                        <th>Marked days</th>
                         <th>Days</th>
                         <th>OT hours</th>
                         <th>Company billing</th>
@@ -985,6 +987,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                           <tr>
                             <th>{worker.name}</th>
                             <td>{worker.zone}</td>
+                            <td>{worker.attendanceEntries}</td>
                             <td>{worker.days}</td>
                             <td>{worker.overtimeHours}</td>
                             <td>{money(worker.companyBilling)}</td>
@@ -1000,7 +1003,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                             </td>
                           </tr>
                           <tr className={styles["company-worker-rates-row"]}>
-                            <td colSpan="7">
+                            <td colSpan="8">
                               <LabourRateEditor
                                 worker={worker}
                                 onSave={saveWorkerRates}
@@ -1012,7 +1015,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       ))}
                       {!companyOverview.workers.length && (
                         <tr>
-                          <td colSpan="7">
+                          <td colSpan="8">
                             <Empty title="No labour found for this company and zone" />
                           </td>
                         </tr>
@@ -1020,6 +1023,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       <tr className={styles["company-detail-total"]}>
                         <th>TOTAL</th>
                         <td />
+                        <td>{companyOverview.totals.attendanceEntries}</td>
                         <td>{companyOverview.totals.days}</td>
                         <td>{companyOverview.totals.overtimeHours}</td>
                         <td>{money(companyOverview.totals.companyBilling)}</td>

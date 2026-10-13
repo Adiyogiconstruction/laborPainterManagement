@@ -9,6 +9,7 @@ const adminSessionSchema = new mongoose.Schema(
       index: true,
     },
     startedAt: { type: Date, required: true },
+    lastSeenAt: { type: Date, required: true },
     expiresAt: { type: Date, required: true },
     endedAt: { type: Date, default: null },
   },

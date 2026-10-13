@@ -14,6 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
+import { subscribeToPaymentChanges } from "../utils/paymentEvents.js";
 import { date, money } from "../utils/formatters.js";
 import {
   Button,
@@ -118,12 +119,14 @@ export function DashboardPage() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") refresh();
     };
+    const unsubscribeFromPaymentChanges = subscribeToPaymentChanges(refresh);
     refresh();
     const intervalId = window.setInterval(refresh, 10_000);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearInterval(intervalId);
+      unsubscribeFromPaymentChanges();
       window.removeEventListener("focus", refresh);
       document.removeEventListener(
         "visibilitychange",

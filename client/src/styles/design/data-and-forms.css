@@ -31,11 +31,38 @@
   gap: 10px;
   margin-bottom: 12px;
 }
+.admin-usage-filters > .field,
+.admin-usage-filters input,
+.admin-usage-filters select {
+  min-width: 0;
+}
+.admin-usage-filters input,
+.admin-usage-filters select {
+  width: 100%;
+}
 .admin-usage-filters > p {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
   font-size: 11px;
+}
+.admin-activity-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.admin-activity-filters > .search {
+  grid-column: span 2;
+}
+.admin-activity-filters .field {
+  min-width: 0;
+}
+.admin-activity-filters input,
+.admin-activity-filters select {
+  width: 100%;
+  min-width: 0;
 }
 .admin-activity-change {
   display: grid;
@@ -137,8 +164,49 @@
   background: #f7faf9;
 }
 .attendance-month-panel .toolbar {
-  gap: 7px;
-  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: end;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+.attendance-month-panel .toolbar > .search {
+  grid-column: span 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  gap: 6px;
+  padding: 0 8px;
+}
+.attendance-month-panel .toolbar > .search input {
+  min-width: 0;
+  padding: 6px 0;
+  font-size: 11px;
+}
+.attendance-month-panel .toolbar > .search:focus-within {
+  border-color: #d6e2df;
+  box-shadow: none;
+  outline: none;
+}
+.attendance-month-panel .toolbar > .search input:focus,
+.attendance-month-panel .toolbar > .search input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+.attendance-month-panel .toolbar > .field {
+  min-width: 0;
+  gap: 3px;
+  font-size: 9px;
+}
+.attendance-month-panel .toolbar > .field input,
+.attendance-month-panel .toolbar > .field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  height: 34px;
+  padding: 5px 7px;
+  font-size: 11px;
 }
 .attendance-month-panel .metric-grid {
   display: flex;
@@ -978,17 +1046,21 @@
   min-width: 0;
 }
 .payment-khata-list-panel .panel-header {
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.payment-khata-list-panel .panel-header > :first-child {
+  width: 100%;
 }
 .payment-list-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 5px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  gap: 6px;
 }
 .payment-list-toolbar .search {
-  min-width: 140px;
-  flex: 1 1 150px;
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .payment-list-toolbar .search input:focus,
 .payment-list-toolbar .search input:focus-visible {
@@ -1002,24 +1074,26 @@
   outline: none;
 }
 .payment-list-toolbar > select {
-  min-width: 96px;
-  max-width: 118px;
-  padding-right: 22px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 34px;
+  padding: 5px 20px 5px 8px;
   font-size: 11px;
 }
 .khata-balance-tabs {
   display: flex;
-  gap: 6px;
-  padding: 0 0 10px;
+  gap: 5px;
+  padding: 0 0 9px;
   border-bottom: 1px solid #eaf0ef;
 }
 .khata-balance-tabs button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 7px 10px;
+  padding: 6px 9px;
   background: transparent;
   color: #647572;
   font-size: 11px;
@@ -1033,8 +1107,8 @@
 }
 .khata-balance-tabs button span {
   display: grid;
-  min-width: 19px;
-  height: 19px;
+  min-width: 17px;
+  height: 17px;
   place-items: center;
   border-radius: 999px;
   background: #e9efed;
@@ -1042,23 +1116,41 @@
   font-size: 10px;
 }
 .khata-balance-totals {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  color: #647572;
+  font-size: 12px;
+}
+.khata-balance-totals > span {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 10px 0;
-  color: #647572;
-  font-size: 10px;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #f7f9f8;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .khata-balance-totals strong {
-  margin-left: 3px;
   color: #253936;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 800;
+}
+.khata-balance-totals .dena-hai strong {
+  color: #bd2837;
+}
+.khata-balance-totals .lena-hai strong {
+  color: #14704e;
 }
 .khata-balance-totals .button {
-  margin-left: auto;
-  min-height: 30px;
-  padding: 5px 8px;
+  justify-self: end;
+  min-height: 32px;
+  padding: 6px 9px;
   font-size: 10px;
 }
 .khata-worker-list {
@@ -1206,6 +1298,9 @@
   padding: 6px 9px;
   font-size: 10px;
 }
+.khata-mobile-back {
+  display: none;
+}
 .khata-net-balance {
   display: flex;
   align-items: center;
@@ -1330,6 +1425,149 @@
 .khata-ledger-footer strong {
   color: #293e39;
 }
+.khata-report-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.khata-report-search {
+  display: grid;
+  grid-column: span 2;
+  gap: 5px;
+  min-width: 0;
+  color: #506561;
+  font-size: 11px;
+  font-weight: 800;
+}
+.khata-report-search .search {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+}
+.khata-report-search .search:focus-within {
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+.khata-report-search .search input:focus,
+.khata-report-search .search input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+.khata-report-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid #e5ecea;
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: #f7f9f8;
+  color: #536762;
+  font-size: 12px;
+  font-weight: 700;
+}
+.khata-report-balance strong {
+  color: #253936;
+  font-size: 15px;
+  text-align: right;
+}
+.khata-report-balance strong.dena-hai {
+  color: #bd2837;
+}
+.khata-report-balance strong.lena-hai {
+  color: #14704e;
+}
+.khata-report-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.khata-report-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #e5ecea;
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: #fff;
+}
+.khata-report-summary span,
+.khata-report-amounts span {
+  color: #74827f;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.khata-report-summary strong {
+  color: #253936;
+  font-size: 14px;
+}
+.khata-report-count strong {
+  font-size: 16px;
+}
+.khata-report-total:nth-child(2) strong {
+  color: #bd2837;
+}
+.khata-report-total:nth-child(3) strong {
+  color: #14704e;
+}
+.khata-report-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(48vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.khata-report-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.75fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e7edeb;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.khata-report-entry-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.khata-report-entry-info strong {
+  overflow-wrap: anywhere;
+  color: #2e423e;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.khata-report-entry-info span,
+.khata-report-entry-info small {
+  color: #768581;
+  font-size: 10px;
+}
+.khata-report-entry-info small {
+  overflow-wrap: anywhere;
+}
+.khata-report-amounts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  text-align: right;
+}
+.khata-report-amounts > div {
+  display: grid;
+  gap: 4px;
+}
+.khata-report-amounts strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .khata-quick-actions {
   display: flex;
   gap: 8px;
@@ -1357,6 +1595,35 @@
 .payment-recycle-panel .table-wrap {
   max-height: 360px;
   overflow: auto;
+}
+.payment-recycle-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 7px;
+  min-width: 250px;
+}
+.payment-recycle-actions .button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+.admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 280px;
+}
+.admin-actions .button {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+.admin-actions .button:last-child {
+  width: 34px;
+  min-width: 34px;
+  padding: 7px;
 }
 .bulk-upload-content {
   display: grid;

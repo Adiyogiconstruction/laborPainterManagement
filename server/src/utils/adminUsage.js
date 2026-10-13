@@ -1,5 +1,6 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INDIA_OFFSET_MS = 330 * 60 * 1000;
+export const SESSION_HEARTBEAT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export function currentUsageDate(now = new Date()) {
   return new Date(new Date(now).getTime() + INDIA_OFFSET_MS)
@@ -65,9 +66,17 @@ export function summarizeAdminUsage(
   for (const session of sessions) {
     const startedAt = new Date(session.startedAt).getTime();
     const expiresAt = new Date(session.expiresAt).getTime();
+    const lastSeenAt = session.lastSeenAt
+      ? new Date(session.lastSeenAt).getTime()
+      : startedAt;
+    const heartbeatIsRecent =
+      lastSeenAt <= nowTime &&
+      nowTime - lastSeenAt <= SESSION_HEARTBEAT_TIMEOUT_MS;
     const endedAt = session.endedAt
       ? new Date(session.endedAt).getTime()
-      : nowTime;
+      : heartbeatIsRecent
+        ? nowTime
+        : lastSeenAt;
     const overlapStart = Math.max(startedAt, startBoundary);
     const overlapEnd = Math.min(endedAt, expiresAt, endBoundary);
     const duration = Math.max(0, overlapEnd - overlapStart);
@@ -75,7 +84,12 @@ export function summarizeAdminUsage(
 
     totalMilliseconds += duration;
     sessionCount += 1;
-    if (!session.endedAt && expiresAt > nowTime && startedAt <= nowTime) {
+    if (
+      !session.endedAt &&
+      heartbeatIsRecent &&
+      expiresAt > nowTime &&
+      startedAt <= nowTime
+    ) {
       activeSessionCount += 1;
     }
   }

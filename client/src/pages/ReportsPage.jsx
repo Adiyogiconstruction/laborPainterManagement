@@ -24,6 +24,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import api, { request } from "../services/apiClient.js";
+import { subscribeToPaymentChanges } from "../utils/paymentEvents.js";
 import { date, inputDate, money, number } from "../utils/formatters.js";
 import {
   AddButton,
@@ -126,6 +127,7 @@ export function ReportsPage() {
   const [teamFilter, setTeamFilter] = useState("");
   const [workZoneFilter, setWorkZoneFilter] = useState("");
   const [skillFilter, setSkillFilter] = useState("");
+  const [workerStatus, setWorkerStatus] = useState("ACTIVE");
   const [paymentKind, setPaymentKind] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [expandedWorker, setExpandedWorker] = useState("");
@@ -196,6 +198,7 @@ export function ReportsPage() {
             from,
             to,
             worker: attendanceWorker,
+            workerStatus,
             companyName: companyFilter,
             teamName: teamFilter,
             workZone: workZoneFilter,
@@ -211,6 +214,7 @@ export function ReportsPage() {
             from,
             to,
             worker: attendanceWorker,
+            workerStatus,
             companyName: companyFilter,
             teamName: teamFilter,
             workZone: workZoneFilter,
@@ -224,6 +228,7 @@ export function ReportsPage() {
             from,
             to,
             worker: attendanceWorker,
+            workerStatus,
             companyName: companyFilter,
             teamName: teamFilter,
             workZone: workZoneFilter,
@@ -251,7 +256,11 @@ export function ReportsPage() {
   useEffect(() => {
     loadSequence.current += 1;
     const timer = window.setTimeout(() => load(), 250);
-    return () => window.clearTimeout(timer);
+    const unsubscribeFromPaymentChanges = subscribeToPaymentChanges(load);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribeFromPaymentChanges();
+    };
   }, [
     from,
     to,
@@ -260,6 +269,7 @@ export function ReportsPage() {
     teamFilter,
     workZoneFilter,
     skillFilter,
+    workerStatus,
     paymentKind,
     paymentMethod,
   ]);
@@ -274,6 +284,7 @@ export function ReportsPage() {
     teamFilter,
     workZoneFilter,
     skillFilter,
+    workerStatus,
     paymentKind,
     paymentMethod,
   ]);
@@ -357,6 +368,14 @@ export function ReportsPage() {
             </span>
           )}
           <span>
+            <strong>Labour</strong>{" "}
+            {workerStatus === "ACTIVE"
+              ? "Active"
+              : workerStatus === "INACTIVE"
+                ? "Inactive"
+                : "All"}
+          </span>
+          <span>
             <strong>Period</strong> {date(`${from}T00:00:00`)} –{" "}
             {date(`${to}T00:00:00`)}
           </span>
@@ -411,6 +430,16 @@ export function ReportsPage() {
                   {worker.name}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Labour status">
+            <select
+              value={workerStatus}
+              onChange={(event) => setWorkerStatus(event.target.value)}
+            >
+              <option value="ACTIVE">Active labour</option>
+              <option value="INACTIVE">Inactive labour</option>
+              <option value="ALL">All labour</option>
             </select>
           </Field>
           {[
@@ -861,8 +890,21 @@ export function ReportsPage() {
           >
             <div className={`${styles["report-summary-grid"]}`}>
               <div>
-                <span>Active workers</span>
-                <strong>{analyticsData.kpis.activeWorkers}</strong>
+                <span>
+                  {workerStatus === "ACTIVE"
+                    ? "Active workers"
+                    : workerStatus === "INACTIVE"
+                      ? "Inactive workers"
+                      : "Matching workers"}
+                </span>
+                <strong>
+                  {workerStatus === "ACTIVE"
+                    ? analyticsData.kpis.activeWorkers
+                    : workerStatus === "INACTIVE"
+                      ? analyticsData.kpis.inactiveWorkers
+                      : analyticsData.kpis.activeWorkers +
+                        analyticsData.kpis.inactiveWorkers}
+                </strong>
               </div>
               <div>
                 <span>Present entries</span>

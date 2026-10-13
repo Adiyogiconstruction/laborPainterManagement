@@ -19,10 +19,10 @@ const formatAmount = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value || 0))}`;
 
-const paymentDetails = (payment) =>
+const paymentDetails = (payment, includeMethod = true) =>
   [
     String(payment.kind || "TRANSACTION").replaceAll("_", " "),
-    payment.method,
+    includeMethod ? payment.method : "",
     payment.reference,
     payment.notes,
   ]
@@ -60,6 +60,13 @@ export function createTransactionStatementPdf({
   from,
   to,
   payments,
+  title = "ACCOUNT STATEMENT",
+  subtitle = "",
+  orientation = "portrait",
+  includeWorker = true,
+  includeBalance = false,
+  balanceValue,
+  balanceLabel,
 }) {
   if (!profile?.companyName?.trim()) {
     throw new Error("Company profile name is required for the statement.");
@@ -70,7 +77,7 @@ export function createTransactionStatementPdf({
   const startDate = formatDate(`${from}T00:00:00`);
   const endDate = formatDate(`${to}T00:00:00`);
   const summary = summarizeTransactions(payments);
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = new jsPDF({ orientation, unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const contentWidth = pageWidth - margin * 2;
@@ -102,23 +109,32 @@ export function createTransactionStatementPdf({
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(29, 55, 49);
-    doc.text("ACCOUNT STATEMENT", margin, titleY + 2);
+    doc.text(title, margin, titleY + 2);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(83, 102, 96);
     doc.text(`${startDate} – ${endDate}`, pageWidth - margin, titleY + 2, {
       align: "right",
     });
+    if (subtitle) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(83, 102, 96);
+      const wrapped = doc.splitTextToSize(subtitle, contentWidth);
+      doc.text(wrapped, margin, titleY + 7);
+      return titleY + 8 + wrapped.length * 3.2;
+    }
     return titleY + 8;
   };
 
   const summaryY = drawHeader();
+  const net = balanceValue === undefined ? summary.net : Number(balanceValue);
   const cards = [
     { label: "TOTAL DEBIT · PAID OUT", value: summary.debit, color: [183, 68, 63] },
     { label: "TOTAL CREDIT · RECEIVED", value: summary.credit, color: [24, 125, 96] },
     {
-      label: `NET BALANCE · ${summary.net >= 0 ? "DR" : "CR"}`,
-      value: Math.abs(summary.net),
+      label: `${balanceLabel || "NET BALANCE"} · ${net >= 0 ? "DR" : "CR"}`,
+      value: Math.abs(net),
       color: [42, 72, 112],
     },
     { label: "NO. OF ENTRIES", value: summary.entries, color: [69, 84, 80], isCount: true },
@@ -143,16 +159,61 @@ export function createTransactionStatementPdf({
     );
   });
 
-  const rows = payments.map((payment) => [
-    formatDate(payment.paidOn),
-    payment.worker?.name || "Business expense",
-    paymentDetails(payment) || "—",
-    payment.flow === "OUTFLOW" ? formatAmount(payment.amount) : "—",
-    payment.flow === "INFLOW" ? formatAmount(payment.amount) : "—",
-  ]);
+  const headers = ["Date"];
+  if (includeWorker) headers.push("Name");
+  headers.push("Details");
+  if (includeBalance) headers.push("Method");
+  headers.push("Debit (-)", "Credit (+)");
+  if (includeBalance) headers.push("Balance");
+  const rows = payments.map((payment) => {
+    const row = [formatDate(payment.paidOn)];
+    if (includeWorker) row.push(payment.worker?.name || "Business expense");
+    row.push(paymentDetails(payment, !includeBalance) || "—");
+    if (includeBalance) row.push(payment.method || "—");
+    row.push(
+      payment.flow === "OUTFLOW" ? formatAmount(payment.amount) : "—",
+      payment.flow === "INFLOW" ? formatAmount(payment.amount) : "—",
+    );
+    if (includeBalance) {
+      row.push(
+        payment.balanceAfter === undefined
+          ? "—"
+          : formatAmount(payment.balanceAfter),
+      );
+    }
+    return row;
+  });
+  const columnStyles = includeBalance
+    ? includeWorker
+      ? {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 35 },
+        2: { cellWidth: 90 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 35, halign: "right", textColor: [165, 61, 57] },
+        5: { cellWidth: 35, halign: "right", textColor: [24, 125, 96] },
+        6: { cellWidth: 34, halign: "right" },
+        }
+      : {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 76 },
+        2: { cellWidth: 24 },
+        3: { cellWidth: 24, halign: "right", textColor: [165, 61, 57] },
+        4: { cellWidth: 24, halign: "right", textColor: [24, 125, 96] },
+        5: { cellWidth: 22, halign: "right" },
+        }
+    : {
+        0: { cellWidth: 23 },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 70 },
+        3: { cellWidth: 29, halign: "right", textColor: [165, 61, 57] },
+        4: { cellWidth: 30, halign: "right", textColor: [24, 125, 96] },
+      };
   autoTable(doc, {
-    head: [["Date", "Name", "Details", "Debit (-)", "Credit (+)"]],
-    body: rows.length ? rows : [["—", "—", "No transactions recorded.", "—", "—"]],
+    head: [headers],
+    body: rows.length
+      ? rows
+      : [headers.map((_, index) => (index === 0 ? "—" : index === 1 ? "No transactions recorded." : "—"))],
     startY: summaryY + 22,
     margin: { left: margin, right: margin, top: 40, bottom: 13 },
     showHead: "everyPage",
@@ -172,13 +233,7 @@ export function createTransactionStatementPdf({
       textColor: [255, 255, 255],
       fontStyle: "bold",
     },
-    columnStyles: {
-      0: { cellWidth: 23 },
-      1: { cellWidth: 38 },
-      2: { cellWidth: 70 },
-      3: { cellWidth: 29, halign: "right", textColor: [165, 61, 57] },
-      4: { cellWidth: 30, halign: "right", textColor: [24, 125, 96] },
-    },
+    columnStyles,
     didDrawPage() {
       if (doc.internal.getCurrentPageInfo().pageNumber > 1) drawHeader();
       const pageNumber = doc.internal.getCurrentPageInfo().pageNumber;
@@ -199,5 +254,7 @@ export function createTransactionStatementPdf({
 
 export function downloadTransactionStatementPdf(options) {
   const doc = createTransactionStatementPdf(options);
-  doc.save(`account-statement-${options.from}-to-${options.to}.pdf`);
+  const fileName =
+    options.fileName || `account-statement-${options.from}-to-${options.to}.pdf`;
+  doc.save(fileName);
 }

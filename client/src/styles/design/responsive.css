@@ -7,7 +7,22 @@
   }
   .payment-list-toolbar {
     width: 100%;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+    gap: 8px;
+  }
+  .payment-list-toolbar .search {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+  .payment-list-toolbar > select {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 38px;
+    font-size: 12px;
   }
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -85,6 +100,12 @@
   .role-grid {
     grid-template-columns: 1fr;
   }
+  .admin-activity-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .admin-activity-filters > .search {
+    grid-column: span 3;
+  }
 }
 @media (max-width: 767px) {
   .dashboard-page-header {
@@ -116,6 +137,13 @@
   .admin-usage-filters > .field:last-of-type {
     grid-column: 1 / -1;
   }
+  .admin-activity-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .admin-activity-filters > .search {
+    grid-column: 1 / -1;
+  }
   .attendance-month-panel .panel-header > div:first-child {
     width: 100%;
     min-height: 0;
@@ -138,25 +166,27 @@
     font-size: 10px;
   }
   .attendance-month-panel .toolbar {
-    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: end;
-    gap: 6px 8px;
-    margin-bottom: 8px;
+    gap: 5px 7px;
+    margin-bottom: 7px;
+  }
+  .attendance-month-panel .toolbar > .search {
+    grid-column: 1 / -1;
   }
   .attendance-month-panel .toolbar .field {
-    min-width: 0;
-    gap: 3px;
-    font-size: 10px;
+    font-size: 9px;
   }
+  .attendance-month-panel .toolbar > .search,
   .attendance-month-panel .toolbar .field input,
   .attendance-month-panel .toolbar .field select {
-    width: 100%;
-    min-width: 0;
-    min-height: 36px;
-    height: 36px;
-    padding: 6px 8px;
-    font-size: 13px;
+    min-height: 34px;
+    height: 34px;
+    font-size: 11px;
+  }
+  .attendance-month-panel .toolbar > .search input {
+    min-height: 30px;
+    height: auto;
+    font-size: 12px;
   }
   .attendance-month-panel .metric-grid {
     gap: 6px;
@@ -913,19 +943,19 @@
     grid-column: 1 / -1;
     width: 100%;
     min-width: 0;
-    min-height: 38px;
+    min-height: 42px;
   }
   .payment-list-toolbar .search input {
-    min-height: 36px;
-    padding: 6px 8px;
+    min-height: 40px;
+    padding: 7px 10px;
     font-size: 14px;
   }
   .payment-list-toolbar > select {
     width: 100%;
     min-width: 0;
     max-width: none;
-    min-height: 38px;
-    padding: 6px 8px;
+    min-height: 42px;
+    padding: 7px 9px;
     font-size: 14px;
   }
   .payment-khata-layout {
@@ -1082,7 +1112,7 @@
     grid-column: 1 / -1;
   }
   .company-detail-summary strong {
-    font-size: 18px;
+    font-size: clamp(11px, 3.6vw, 14px);
   }
   .company-worker-rate-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1090,18 +1120,133 @@
     max-width: 380px;
   }
   .khata-balance-tabs {
-    gap: 2px;
+    gap: 4px;
   }
   .khata-balance-tabs button {
-    gap: 4px;
-    padding: 6px;
-    font-size: 9px;
+    flex: 1 1 0;
+    justify-content: center;
+    gap: 5px;
+    min-height: 40px;
+    padding: 6px 4px;
+    font-size: 11px;
   }
   .khata-balance-totals {
-    gap: 6px 9px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 8px 0;
+  }
+  .khata-balance-totals > span {
+    gap: 4px;
+    padding: 8px;
+    font-size: 11px;
+  }
+  .khata-balance-totals strong {
+    font-size: 13px;
   }
   .khata-balance-totals .button {
-    margin-left: 0;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    width: 100%;
+    min-height: 38px;
+    font-size: 12px;
+  }
+  .khata-report-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-bottom: 10px;
+  }
+  .khata-report-search {
+    grid-column: 1 / -1;
+  }
+  .khata-report-search .search {
+    min-height: 40px;
+  }
+  .khata-report-filters .field input,
+  .khata-report-filters .field select {
+    min-height: 40px;
+  }
+  .khata-report-balance {
+    align-items: flex-start;
+    padding: 10px;
+    font-size: 11px;
+  }
+  .khata-report-balance strong {
+    font-size: 13px;
+  }
+  .khata-report-summary {
+    gap: 6px;
+  }
+  .khata-report-summary > div {
+    padding: 8px;
+  }
+  .khata-report-summary strong {
+    font-size: 12px;
+  }
+  .khata-report-count strong {
+    font-size: 14px;
+  }
+  .khata-report-entry {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 10px;
+  }
+  .khata-report-amounts {
+    border-top: 1px solid #edf1f0;
+    padding-top: 8px;
+    text-align: left;
+  }
+  .khata-report-amounts > div {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+  }
+  .khata-report-amounts strong {
+    justify-self: end;
+  }
+  .khata-report-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: 94vh;
+    max-height: 94dvh;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  .khata-report-modal .modal-head {
+    position: relative;
+    top: auto;
+    display: block;
+    flex: 0 0 auto;
+    margin: 0 -2px 12px;
+    padding: 0 42px 0 2px;
+  }
+  .khata-report-modal .modal-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .khata-report-modal .modal-head h2 {
+    font-size: 17px;
+    line-height: 1.25;
+  }
+  .khata-report-modal .modal-title-row > .button {
+    width: 100%;
+    min-height: 38px;
+    justify-content: center;
+  }
+  .khata-report-modal .modal-head > .icon-button {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+  .khata-report-modal > .khata-report-filters,
+  .khata-report-modal > .khata-report-balance,
+  .khata-report-modal > .khata-report-summary {
+    flex: 0 0 auto;
+  }
+  .khata-report-modal > .khata-report-list {
+    flex: 1 1 auto;
+    min-height: 120px;
+    max-height: none;
   }
   .khata-quick-actions {
     flex-direction: column;
@@ -1231,6 +1376,192 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .workforce-filter-grid > .search {
+    grid-column: auto;
+  }
+}
+@media (max-width: 767px) {
+  .sidebar {
+    padding-top: calc(23px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .sidebar nav a {
+    min-height: 44px;
+  }
+  .topbar {
+    height: auto;
+    min-height: 62px;
+    padding-top: env(safe-area-inset-top);
+  }
+  .report-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .report-tabs button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    scroll-snap-align: start;
+    white-space: nowrap;
+  }
+  .report-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .metric-grid.dashboard-metrics-primary,
+  .metric-grid.workforce-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .table-wrap {
+    scrollbar-width: thin;
+  }
+  .workforce-pagination {
+    align-items: center;
+    gap: 8px;
+  }
+  .workforce-pagination > span {
+    margin-left: 0;
+  }
+  .workforce-pagination select,
+  .workforce-pagination .button {
+    min-height: 40px;
+  }
+  .workforce-pagination > div > button {
+    min-height: 44px;
+  }
+  .admin-activity-pager button {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+  }
+  .payment-khata-layout.payment-khata-selected
+    .payment-khata-list-panel {
+    display: none;
+  }
+  .payment-khata-layout:not(.payment-khata-selected)
+    .payment-khata-detail-panel {
+    display: none;
+  }
+  .payment-khata-detail-panel .khata-detail-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 7px;
+  }
+  .payment-khata-detail-panel .khata-detail-actions .button {
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+    padding: 7px;
+    white-space: normal;
+  }
+  .payment-khata-detail-panel .khata-detail-actions .khata-mobile-back {
+    grid-column: 1 / -1;
+  }
+  .khata-mobile-back {
+    display: inline-flex;
+  }
+  .khata-worker-list {
+    max-height: min(52vh, 520px);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .filter-bar .field input,
+  .filter-bar .field select,
+  .toolbar .field input,
+  .toolbar .field select,
+  .toolbar > select,
+  .workforce-filter-grid select,
+  .payment-list-toolbar > select,
+  .admin-usage-filters .field input,
+  .admin-usage-filters .field select,
+  .admin-activity-filters .field input,
+  .admin-activity-filters .field select,
+  .company-detail-filters .field input,
+  .company-detail-filters .field select,
+  .company-profit-filters select,
+  .company-profit-custom-range input,
+  .company-zone-edit-row input,
+  .company-zone-edit-row select,
+  .company-worker-rate-form input,
+  .company-assignment-form input,
+  .site-row input,
+  .khata-entry-filters .field input,
+  .khata-entry-filters .field select,
+  .khata-report-filters .field input,
+  .khata-report-filters .field select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .workforce-filter-grid > .search,
+  .payment-list-toolbar .search,
+  .toolbar > .search,
+  .filter-bar > .search,
+  .khata-report-search .search {
+    min-height: 44px;
+  }
+  .search input,
+  .payment-list-toolbar .search input {
+    min-height: 42px;
+    font-size: 16px;
+  }
+  .button,
+  .actions-inline > button,
+  .section-tabs button,
+  .khata-balance-tabs button,
+  .khata-detail-actions button,
+  .worker-picker-results button {
+    min-height: 44px;
+  }
+  .button {
+    white-space: normal;
+    line-height: 1.25;
+  }
+  .attendance-month-panel .actions-inline button,
+  .workforce-controls-panel .workforce-export-actions .button,
+  .company-worker-rate-form .button,
+  .company-assignment-actions .button,
+  .company-assignment-actions-inline .button,
+  .company-client-list-actions .button,
+  .company-client-row .actions-inline .button,
+  .company-client-collapse,
+  .khata-detail-actions .button,
+  .khata-list-footer .button,
+  .payment-recycle-actions .button,
+  .admin-actions .button {
+    min-height: 44px;
+  }
+  .page-header.dashboard-page-header > .button {
+    flex-basis: 44px;
+    width: 44px;
+    min-height: 44px;
+  }
+  .modal {
+    width: 100%;
+  }
+  .modal-actions .button {
+    min-height: 44px;
+  }
+}
+@media (max-width: 360px) {
+  .metric-grid,
+  .metric-grid.workforce-metrics,
+  .metric-grid.dashboard-metrics-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric,
+  .dashboard-metrics .metric-primary {
+    min-height: 96px;
+  }
+  .report-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .payment-khata-detail-panel .khata-detail-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .payment-khata-detail-panel .khata-detail-actions .khata-mobile-back {
     grid-column: auto;
   }
 }

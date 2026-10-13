@@ -319,6 +319,11 @@ export function AdminsPage() {
   const [usagePeriod, setUsagePeriod] = useState("day");
   const [usageDate, setUsageDate] = useState(currentUsageDate);
   const [usageAdmin, setUsageAdmin] = useState("");
+  const [activityAdmin, setActivityAdmin] = useState("");
+  const [activityAction, setActivityAction] = useState("");
+  const [activityFrom, setActivityFrom] = useState("");
+  const [activityTo, setActivityTo] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
   const [activityPages, setActivityPages] = useState({});
   const [adding, setAdding] = useState(false);
   const [resetting, setResetting] = useState(null);
@@ -364,6 +369,17 @@ export function AdminsPage() {
   useEffect(() => {
     loadUsage();
   }, [usagePeriod, usageDate]);
+  useEffect(() => {
+    const refreshUsage = () => {
+      if (document.visibilityState === "visible") loadUsage();
+    };
+    const intervalId = window.setInterval(refreshUsage, 10 * 60 * 1000);
+    document.addEventListener("visibilitychange", refreshUsage);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refreshUsage);
+    };
+  }, [usagePeriod, usageDate]);
   const visibleUsageRows = usageRows.filter(
     (user) => !usageAdmin || user.id === usageAdmin,
   );
@@ -392,6 +408,41 @@ export function AdminsPage() {
   const changeActivityPage = (userId, nextPage) => {
     setActivityPages((current) => ({ ...current, [userId]: nextPage }));
   };
+  const filteredActivitiesFor = (user, activities = user.activities || []) => {
+    const query = activitySearch.trim().toLocaleLowerCase();
+    return activities.filter((activity) => {
+      const createdAt = activity.createdAt ? new Date(activity.createdAt) : null;
+      const createdDate = createdAt
+        ? `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}-${String(createdAt.getDate()).padStart(2, "0")}`
+        : "";
+      if (activityAction && activity.action !== activityAction) return false;
+      if (activityFrom && (!createdDate || createdDate < activityFrom)) {
+        return false;
+      }
+      if (activityTo && (!createdDate || createdDate > activityTo)) {
+        return false;
+      }
+      if (
+        query &&
+        ![activity.action, activity.message, user.name, user.email].some(
+          (value) =>
+            String(value || "")
+              .toLocaleLowerCase()
+              .includes(query),
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+  };
+  const filteredChangesFor = (user) =>
+    filteredActivitiesFor(user, user.recentChanges || []);
+  const visibleActivityUsers = users.filter(
+    (user) =>
+      (!activityAdmin || user.id === activityAdmin) &&
+      filteredActivitiesFor(user).length > 0,
+  );
   const downloadActivity = async (user) => {
     setError("");
     try {
@@ -401,7 +452,13 @@ export function AdminsPage() {
       downloadAdminActivityPdf({
         user,
         profile: companyProfile,
-        activities: user.activities || [],
+        activities: filteredActivitiesFor(user),
+        filters: {
+          activity: activityAction,
+          fromDate: activityFrom,
+          toDate: activityTo,
+          search: activitySearch.trim(),
+        },
       });
     } catch (err) {
       setError(errorMessage(err));
@@ -477,7 +534,7 @@ export function AdminsPage() {
                   </td>
                   <td>
                     {user.role !== "OWNER" && (
-                      <div className={`${styles["actions-inline"]}`}>
+                      <div className={styles["admin-actions"]}>
                         <Button
                           type="button"
                           className={`${styles["button-secondary"]}`}
@@ -516,7 +573,7 @@ export function AdminsPage() {
       </Panel>
       <Panel
         title="Website usage time"
-        detail="Login-to-logout duration, including idle time. Sessions without logout are counted up to the 8-hour login expiry."
+        detail="Logged-in time includes idle time while the app remains open. Logout stops it immediately; if the browser closes, time ends at the last 10-minute activity check."
         action={
           <Button
             type="button"
@@ -621,6 +678,7 @@ export function AdminsPage() {
       <Panel
         title="Access activity"
         detail="Owner-only record of login times, logout times and all recorded admin actions."
+        className={styles["admin-access-activity-panel"]}
         action={
           <Button
             type="button"
@@ -631,6 +689,65 @@ export function AdminsPage() {
           </Button>
         }
       >
+        <div className={styles["admin-activity-filters"]}>
+          <SearchBox
+            value={activitySearch}
+            onChange={setActivitySearch}
+            placeholder="Search admin or activity"
+          />
+          <Field label="Administrator">
+            <select
+              value={activityAdmin}
+              onChange={(event) => setActivityAdmin(event.target.value)}
+            >
+              <option value="">All administrators</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Activity">
+            <select
+              value={activityAction}
+              onChange={(event) => setActivityAction(event.target.value)}
+            >
+              <option value="">All activities</option>
+              {[
+                "LOGIN",
+                "LOGOUT",
+                "SETUP",
+                "CREATE",
+                "UPDATE",
+                "DELETE",
+                "PASSWORD_RESET",
+                "ACCESS_TOGGLE",
+                "ROLE_CHANGE",
+              ].map((action) => (
+                <option key={action} value={action}>
+                  {action.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="From date">
+            <input
+              type="date"
+              value={activityFrom}
+              max={activityTo || undefined}
+              onChange={(event) => setActivityFrom(event.target.value)}
+            />
+          </Field>
+          <Field label="To date">
+            <input
+              type="date"
+              value={activityTo}
+              min={activityFrom || undefined}
+              onChange={(event) => setActivityTo(event.target.value)}
+            />
+          </Field>
+        </div>
         <div className={`${styles["table-wrap"]}`}>
           <table>
             <thead>
@@ -643,73 +760,90 @@ export function AdminsPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td>
-                    <strong>{user.name}</strong>
-                    <small>{user.role}</small>
-                  </td>
-                  <td>{dateTime(user.lastLoginAt)}</td>
-                  <td>{dateTime(user.lastLogoutAt)}</td>
-                  <td>
-                    {user.recentChanges?.length ? (() => {
-                      const page = Math.min(
-                        activityPages[user.id] || 0,
-                        user.recentChanges.length - 1,
-                      );
-                      const event = user.recentChanges[page];
-                      return (
-                        <div className={`${styles["admin-activity-change"]}`}>
-                          <div className={`${styles["admin-activity-entry"]}`}>
-                            <small>{dateTime(event.createdAt)}</small>
-                            <span>{event.message}</span>
+              {visibleActivityUsers.map((user) => {
+                const matchingActivities = filteredActivitiesFor(user);
+                const recentChanges = filteredChangesFor(user);
+                const lastLogin = matchingActivities.find(
+                  (activity) => activity.action === "LOGIN",
+                );
+                const lastLogout = matchingActivities.find(
+                  (activity) => activity.action === "LOGOUT",
+                );
+                return (
+                  <tr key={user.id}>
+                    <td>
+                      <strong>{user.name}</strong>
+                      <small>{user.role}</small>
+                    </td>
+                    <td>{dateTime(lastLogin?.createdAt)}</td>
+                    <td>{dateTime(lastLogout?.createdAt)}</td>
+                    <td>
+                      {recentChanges.length ? (() => {
+                        const page = Math.min(
+                          activityPages[user.id] || 0,
+                          recentChanges.length - 1,
+                        );
+                        const event = recentChanges[page];
+                        return (
+                          <div className={`${styles["admin-activity-change"]}`}>
+                            <div className={`${styles["admin-activity-entry"]}`}>
+                              <small>{dateTime(event.createdAt)}</small>
+                              <span>{event.message}</span>
+                            </div>
+                            <div className={`${styles["admin-activity-pager"]}`}>
+                              <button
+                                type="button"
+                                className={`${styles["button-secondary"]}`}
+                                aria-label={`Previous change for ${user.name}`}
+                                onClick={() =>
+                                  changeActivityPage(user.id, page - 1)
+                                }
+                                disabled={page === 0}
+                              >
+                                <ChevronLeft size={14} />
+                              </button>
+                              <small>
+                                {page + 1} / {recentChanges.length}
+                              </small>
+                              <button
+                                type="button"
+                                className={`${styles["button-secondary"]}`}
+                                aria-label={`Next change for ${user.name}`}
+                                onClick={() =>
+                                  changeActivityPage(user.id, page + 1)
+                                }
+                                disabled={page >= recentChanges.length - 1}
+                              >
+                                <ChevronRight size={14} />
+                              </button>
+                            </div>
                           </div>
-                          <div className={`${styles["admin-activity-pager"]}`}>
-                            <button
-                              type="button"
-                              className={`${styles["button-secondary"]}`}
-                              aria-label={`Previous change for ${user.name}`}
-                              onClick={() =>
-                                changeActivityPage(user.id, page - 1)
-                              }
-                              disabled={page === 0}
-                            >
-                              <ChevronLeft size={14} />
-                            </button>
-                            <small>
-                              {page + 1} / {user.recentChanges.length}
-                            </small>
-                            <button
-                              type="button"
-                              className={`${styles["button-secondary"]}`}
-                              aria-label={`Next change for ${user.name}`}
-                              onClick={() =>
-                                changeActivityPage(user.id, page + 1)
-                              }
-                              disabled={page >= user.recentChanges.length - 1}
-                            >
-                              <ChevronRight size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })() : (
-                      <span style={{ color: "#7a8c89", fontSize: "11px" }}>
-                        No admin changes recorded.
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <Button
-                      type="button"
-                      className={`${styles["button-secondary"]}`}
-                      onClick={() => downloadActivity(user)}
-                    >
-                      <FileDown size={15} /> Download PDF
-                    </Button>
+                        );
+                      })() : (
+                        <span style={{ color: "#7a8c89", fontSize: "11px" }}>
+                          No admin changes recorded.
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <Button
+                        type="button"
+                        className={`${styles["button-secondary"]}`}
+                        onClick={() => downloadActivity(user)}
+                      >
+                        <FileDown size={15} /> Download PDF
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!visibleActivityUsers.length && (
+                <tr>
+                  <td colSpan="5">
+                    <Empty title="No matching admin activity" />
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

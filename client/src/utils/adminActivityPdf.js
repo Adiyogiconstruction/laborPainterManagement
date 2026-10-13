@@ -12,7 +12,12 @@ const formatDateTime = (value) =>
       }).format(new Date(value))
     : "—";
 
-export function createAdminActivityPdf({ user, profile, activities }) {
+export function createAdminActivityPdf({
+  user,
+  profile,
+  activities,
+  filters = {},
+}) {
   if (!user?.name || !user?.email || !Array.isArray(activities)) {
     throw new Error("Administrator details and activity history are required.");
   }
@@ -70,7 +75,42 @@ export function createAdminActivityPdf({ user, profile, activities }) {
     margin,
     headerY,
   );
-  headerY += 4;
+  headerY += 7;
+
+  const formatFilterDate = (value) =>
+    value
+      ? new Intl.DateTimeFormat("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
+        }).format(new Date(`${value}T00:00:00.000Z`))
+      : "";
+  const appliedFilters = [
+    `Administrator: ${user.name}`,
+    `Activity: ${filters.activity ? filters.activity.replaceAll("_", " ") : "All activities"}`,
+    `Date range: ${
+      filters.fromDate || filters.toDate
+        ? `${formatFilterDate(filters.fromDate) || "Any"} to ${formatFilterDate(filters.toDate) || "Any"}`
+        : "All dates"
+    }`,
+    `Search: ${filters.search || "None"}`,
+  ];
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(25, 39, 38);
+  doc.text("FILTERS APPLIED", margin, headerY);
+  headerY += 4.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(75, 89, 87);
+  for (const filter of appliedFilters) {
+    const wrapped = doc.splitTextToSize(filter, pageWidth - margin * 2);
+    doc.text(wrapped, margin, headerY);
+    headerY += wrapped.length * 3.5;
+  }
+  headerY += 3;
 
   const rows = activities.map((activity) => {
     const context = Object.entries(activity.meta || {})

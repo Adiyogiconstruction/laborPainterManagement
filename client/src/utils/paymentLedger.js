@@ -6,22 +6,42 @@ export const balanceType = (worker) => {
 
 export function filterAndSortWorkers(
   workers,
-  { search = "", company = "", balance = "ALL", sort = "RECENT" } = {},
+  {
+    search = "",
+    company = "",
+    team = "",
+    zone = "",
+    status = "ALL",
+    balance = "ALL",
+    sort = "RECENT",
+  } = {},
 ) {
   const query = search.trim().toLocaleLowerCase();
   const result = workers.filter((worker) => {
     if (company && worker.companyName !== company) return false;
+    if (team && worker.teamName !== team) return false;
+    if (zone && worker.workZone !== zone) return false;
+    if (status === "ACTIVE" && !worker.active) return false;
+    if (status === "INACTIVE" && worker.active) return false;
     const type = balanceType(worker);
     if (balance === "DUE" && type !== "DENA_HAI") return false;
     if (balance === "OVERPAID" && type !== "LENA_HAI") return false;
     if (!query) return true;
-    return [worker.name, worker.phone, worker.companyName, worker.workZone]
-      .some((value) => String(value || "").toLocaleLowerCase().includes(query));
+    return [
+      worker.name,
+      worker.phone,
+      worker.companyName,
+      worker.teamName,
+      worker.workZone,
+    ].some((value) =>
+      String(value || "")
+        .toLocaleLowerCase()
+        .includes(query),
+    );
   });
 
   return result.sort((left, right) => {
-    const leftBalance =
-      Number(left.totalDue || 0) - Number(left.overpaid || 0);
+    const leftBalance = Number(left.totalDue || 0) - Number(left.overpaid || 0);
     const rightBalance =
       Number(right.totalDue || 0) - Number(right.overpaid || 0);
     if (sort === "BALANCE_HIGH") {

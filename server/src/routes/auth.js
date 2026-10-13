@@ -41,6 +41,7 @@ const startAdminSession = async (user) => {
   return AdminSession.create({
     user: user._id,
     startedAt,
+    lastSeenAt: startedAt,
     expiresAt: new Date(
       startedAt.getTime() + SESSION_DURATION_SECONDS * 1000,
     ),
@@ -321,6 +322,26 @@ router.get("/me", requireAuth, (req, res) =>
   res.json({ user: safeUser(req.user) }),
 );
 
+router.post(
+  "/session/heartbeat",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const result = await AdminSession.updateOne(
+      {
+        _id: req.sessionId,
+        user: req.user._id,
+        endedAt: null,
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { lastSeenAt: new Date() } },
+    );
+    if (!result.matchedCount) {
+      throw new ApiError(401, "Your session has expired. Please sign in again.");
+    }
+    res.status(204).end();
+  }),
+);
+
 router.get(
   "/admins",
   requireAuth,
@@ -380,7 +401,7 @@ router.get(
             startedAt: { $lt: currentPeriodEnd },
             expiresAt: { $gt: range.start },
             $or: [{ endedAt: null }, { endedAt: { $gt: range.start } }],
-          }).select("user startedAt expiresAt endedAt")
+          }).select("user startedAt lastSeenAt expiresAt endedAt")
         : [],
     ]);
     const sessionsByUser = new Map();

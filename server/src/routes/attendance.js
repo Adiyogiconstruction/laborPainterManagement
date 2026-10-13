@@ -164,7 +164,6 @@ router.get(
     const days = new Date(year, monthNumber, 0).getDate();
     const [workers, records, sheet] = await Promise.all([
       Worker.find({
-        active: true,
         type,
         deletedAt: null,
       }).sort({ name: 1 }),
@@ -247,7 +246,6 @@ router.post(
     const [workers, existingRecords] = await Promise.all([
       Worker.find({
         _id: { $in: workerIds },
-        active: true,
         deletedAt: null,
       }),
       Attendance.find({
@@ -294,6 +292,7 @@ router.post(
         entryDate,
         rateContext,
       );
+      const assignedCompany = rateContext.companyByName.get(worker.companyName);
       const dailyRate = Number(
         existing?.dailyRate ?? effectiveRates.dailyRate,
       );
@@ -311,6 +310,8 @@ router.post(
           update: {
             $set: {
               worker: worker._id,
+              company: existing?.company ?? assignedCompany?._id ?? null,
+              companyName: existing?.companyName ?? worker.companyName ?? "",
               type: worker.type,
               date: entryDate,
               status,
@@ -403,6 +404,9 @@ router.put(
       asDateOnly(date),
       rateContext,
     );
+    const assignedCompany = rateContext.companyByName.get(
+      workerRecord.companyName,
+    );
     const rateSnapshot = Number(
       existing?.dailyRate ?? effectiveRates.dailyRate,
     );
@@ -427,6 +431,8 @@ router.put(
       { worker, date: baseDate },
       {
         worker,
+        company: existing?.company ?? assignedCompany?._id ?? null,
+        companyName: existing?.companyName ?? workerRecord.companyName ?? "",
         type: workerType,
         date: baseDate,
         status: normalizedStatus,

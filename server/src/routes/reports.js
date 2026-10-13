@@ -27,6 +27,15 @@ const addWorkerAttributeFilter = (workerFilter, field, value) => {
     value === "Unassigned" ? { $in: ["", null] } : value;
 };
 
+const applyWorkerStatusFilter = (workerFilter, status, fallback) => {
+  const selectedStatus = status || fallback;
+  if (!["ACTIVE", "INACTIVE", "ALL"].includes(selectedStatus)) return false;
+  if (selectedStatus !== "ALL") {
+    workerFilter.active = selectedStatus === "ACTIVE";
+  }
+  return true;
+};
+
 router.get(
   "/operations",
   asyncHandler(async (req, res) => {
@@ -35,6 +44,9 @@ router.get(
     }
     const paymentFilter = { deletedAt: null };
     const workerFilter = { type: req.query.type || "LABOUR", deletedAt: null };
+    if (!applyWorkerStatusFilter(workerFilter, req.query.workerStatus, "ALL")) {
+      return res.status(400).json({ message: "Choose a valid labour status." });
+    }
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
       addWorkerAttributeFilter(workerFilter, field, req.query[field]);
     }
@@ -100,7 +112,10 @@ router.get(
       new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
         .toISOString()
         .slice(0, 10);
-    const workerFilter = { active: true, deletedAt: null, type };
+    const workerFilter = { deletedAt: null, type };
+    if (!applyWorkerStatusFilter(workerFilter, req.query.workerStatus, "ACTIVE")) {
+      return res.status(400).json({ message: "Choose a valid labour status." });
+    }
     for (const field of ["companyName", "teamName", "workZone", "skill"]) {
       addWorkerAttributeFilter(workerFilter, field, req.query[field]);
     }

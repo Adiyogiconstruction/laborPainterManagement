@@ -3,11 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowDownLeft,
+  ArrowLeft,
   ArrowUpRight,
   Download,
+  FileDown,
   MessageCircle,
   Pencil,
-  Printer,
   Settings2,
   Trash2,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { date, inputDate, money } from "../utils/formatters.js";
 import {
   AddButton,
   Button,
+  DeleteConfirm,
   Empty,
   Field,
   Modal,
@@ -31,6 +33,10 @@ import {
   filterAndSortWorkers,
   paymentBalances,
 } from "../utils/paymentLedger.js";
+import {
+  notifyPaymentDataChanged,
+  subscribeToPaymentChanges,
+} from "../utils/paymentEvents.js";
 
 const paymentColumns = [
   ["Date", "date"],
@@ -90,7 +96,9 @@ function PaymentForm({
     return workers
       .filter((worker) =>
         [worker.name, worker.phone].some((value) =>
-          String(value || "").toLocaleLowerCase().includes(query),
+          String(value || "")
+            .toLocaleLowerCase()
+            .includes(query),
         ),
       )
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -108,12 +116,15 @@ function PaymentForm({
     setError("");
     try {
       if (!form.worker) {
-        throw new Error("Please select a labour record from the search results.");
+        throw new Error(
+          "Please select a labour record from the search results.",
+        );
       }
       const payload = { ...form, amount: Number(form.amount) };
       const result = initialPayment
         ? await request(api.patch(`/payments/${initialPayment._id}`, payload))
         : await request(api.post("/payments", payload));
+      notifyPaymentDataChanged();
       await onSaved(result.payment);
     } catch (err) {
       setError(errorMessage(err));
@@ -156,7 +167,9 @@ function PaymentForm({
             />
             {selectedWorker && (
               <div className={styles["payment-worker-due"]}>
-                <strong>Current due: {money(selectedWorker.totalDue || 0)}</strong>
+                <strong>
+                  Current due: {money(selectedWorker.totalDue || 0)}
+                </strong>
                 <small>
                   Given {money(selectedWorker.totalPaid || 0)} · Received{" "}
                   {money(selectedWorker.totalReturned || 0)}
@@ -276,14 +289,6 @@ function PaymentForm({
   );
 }
 
-const escapeHtml = (value) =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-
 const relativeDate = (value) => {
   if (!value) return "No payment yet";
   const days = Math.max(
@@ -303,6 +308,9 @@ export function PaymentKhataPage() {
   const [selectedWorkerId, setSelectedWorkerId] = useState("");
   const [workerSearch, setWorkerSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [balanceFilter, setBalanceFilter] = useState("ALL");
   const [sortOrder, setSortOrder] = useState("RECENT");
   const [paymentKindFilter, setPaymentKindFilter] = useState("");
@@ -313,11 +321,23 @@ export function PaymentKhataPage() {
   const [pageSize, setPageSize] = useState(10);
   const [showCompany, setShowCompany] = useState(true);
   const [showZone, setShowZone] = useState(true);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportFrom, setReportFrom] = useState(
+    () => `${inputDate().slice(0, 7)}-01`,
+  );
+  const [reportTo, setReportTo] = useState(inputDate);
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportSort, setReportSort] = useState("NEWEST");
+  const [reportPayments, setReportPayments] = useState([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addingFlow, setAddingFlow] = useState("");
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
+  const [permanentlyDeleting, setPermanentlyDeleting] = useState(null);
   const [deletedPayments, setDeletedPayments] = useState([]);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [error, setError] = useState("");
@@ -366,6 +386,17 @@ export function PaymentKhataPage() {
   useEffect(() => {
     loadPayments();
   }, [selectedWorkerId]);
+  useEffect(
+    () =>
+      subscribeToPaymentChanges((source) => {
+        if (source !== "remote") return;
+        loadWorkers();
+        loadPayments();
+        if (showRecycleBin) loadDeletedPayments();
+        if (reportOpen) loadMasterReport();
+      }),
+    [showRecycleBin, reportOpen],
+  );
   useEffect(() => {
     if (showRecycleBin) {
       recycleBinRef.current?.scrollIntoView({
@@ -377,24 +408,50 @@ export function PaymentKhataPage() {
 
   const companies = useMemo(
     () =>
-      [...new Set(workers.map((worker) => worker.companyName?.trim()).filter(Boolean))]
-        .sort((left, right) => left.localeCompare(right)),
+      [
+        ...new Set(
+          workers.map((worker) => worker.companyName?.trim()).filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
     [workers],
   );
-  const companyWorkers = companyFilter
-    ? workers.filter((worker) => worker.companyName === companyFilter)
-    : workers;
-  const dueCount = companyWorkers.filter(
+  const teams = useMemo(
+    () =>
+      [
+        ...new Set(
+          workers.map((worker) => worker.teamName?.trim()).filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [workers],
+  );
+  const zones = useMemo(
+    () =>
+      [
+        ...new Set(
+          workers.map((worker) => worker.workZone?.trim()).filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [workers],
+  );
+  const accountWorkers = workers.filter(
+    (worker) =>
+      (!companyFilter || worker.companyName === companyFilter) &&
+      (!teamFilter || worker.teamName === teamFilter) &&
+      (!zoneFilter || worker.workZone === zoneFilter) &&
+      (statusFilter === "ALL" ||
+        (statusFilter === "ACTIVE" ? worker.active : !worker.active)),
+  );
+  const dueCount = accountWorkers.filter(
     (worker) => balanceType(worker) === "DENA_HAI",
   ).length;
-  const overpaidCount = companyWorkers.filter(
+  const overpaidCount = accountWorkers.filter(
     (worker) => balanceType(worker) === "LENA_HAI",
   ).length;
-  const totalDue = companyWorkers.reduce(
+  const totalDue = accountWorkers.reduce(
     (sum, worker) => sum + Number(worker.totalDue || 0),
     0,
   );
-  const totalOverpaid = companyWorkers.reduce(
+  const totalOverpaid = accountWorkers.reduce(
     (sum, worker) => sum + Number(worker.overpaid || 0),
     0,
   );
@@ -402,6 +459,9 @@ export function PaymentKhataPage() {
     return filterAndSortWorkers(workers, {
       search: workerSearch,
       company: companyFilter,
+      team: teamFilter,
+      zone: zoneFilter,
+      status: statusFilter,
       balance: balanceFilter,
       sort: sortOrder,
     });
@@ -409,6 +469,9 @@ export function PaymentKhataPage() {
     workers,
     workerSearch,
     companyFilter,
+    teamFilter,
+    zoneFilter,
+    statusFilter,
     balanceFilter,
     sortOrder,
   ]);
@@ -430,7 +493,8 @@ export function PaymentKhataPage() {
   );
   const visibleEntries = entries.filter((payment) => {
     if (paymentKindFilter && payment.kind !== paymentKindFilter) return false;
-    if (paymentMethodFilter && payment.method !== paymentMethodFilter) return false;
+    if (paymentMethodFilter && payment.method !== paymentMethodFilter)
+      return false;
     const paidOn = new Date(payment.paidOn).toISOString().slice(0, 10);
     if (from && paidOn < from) return false;
     if (to && paidOn > to) return false;
@@ -442,6 +506,67 @@ export function PaymentKhataPage() {
   const receivedInEntries = visibleEntries
     .filter((payment) => payment.flow === "INFLOW")
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const reportEntries = useMemo(() => {
+    const query = reportSearch.trim().toLocaleLowerCase();
+    return reportPayments
+      .filter((payment) => {
+        const paidOn = new Date(payment.paidOn).toISOString().slice(0, 10);
+        if (reportFrom && paidOn < reportFrom) return false;
+        if (reportTo && paidOn > reportTo) return false;
+        if (!query) return true;
+        return [
+          payment.worker?.name,
+          payment.kind?.replaceAll("_", " "),
+          payment.notes,
+          payment.reference,
+          payment.method,
+        ].some((value) =>
+          String(value || "")
+            .toLocaleLowerCase()
+            .includes(query),
+        );
+      })
+      .sort((left, right) => {
+        const dateDifference =
+          new Date(left.createdAt || left.paidOn).getTime() -
+          new Date(right.createdAt || right.paidOn).getTime();
+        return reportSort === "OLDEST" ? dateDifference : -dateDifference;
+      });
+  }, [reportPayments, reportFrom, reportTo, reportSearch, reportSort]);
+  const reportGiven = reportEntries
+    .filter((payment) => payment.flow !== "INFLOW")
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const reportReceived = reportEntries
+    .filter((payment) => payment.flow === "INFLOW")
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const reportNet = reportGiven - reportReceived;
+  const loadMasterReport = async () => {
+    setReportLoading(true);
+    setReportError("");
+    try {
+      const firstPage = await request(
+        api.get("/payments", { params: { limit: 500, skip: 0 } }),
+      );
+      const allPayments = [...(firstPage.payments || [])];
+      for (let start = 500; start < firstPage.total; start += 5000) {
+        const pageRequests = [];
+        const batchEnd = Math.min(start + 5000, firstPage.total);
+        for (let skip = start; skip < batchEnd; skip += 500) {
+          pageRequests.push(
+            request(api.get("/payments", { params: { limit: 500, skip } })),
+          );
+        }
+        const pages = await Promise.all(pageRequests);
+        pages.forEach(({ payments = [] }) => allPayments.push(...payments));
+      }
+      setReportPayments(allPayments);
+      setReportOpen(true);
+    } catch (err) {
+      setReportError(errorMessage(err));
+    } finally {
+      setReportLoading(false);
+    }
+  };
 
   const loadDeletedPayments = async () => {
     try {
@@ -464,17 +589,15 @@ export function PaymentKhataPage() {
     setError("");
     const message = buildPaymentReminder(selectedWorker);
     const digits = selectedWorker.phone.replace(/\D/g, "");
-    const internationalPhone =
-      digits.length === 10 ? `91${digits}` : digits;
+    const internationalPhone = digits.length === 10 ? `91${digits}` : digits;
     const url = `https://wa.me/${internationalPhone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
   const exportExcel = async () => {
     if (!selectedWorker) return;
     try {
-      const { buildWorkforceWorkbook } = await import(
-        "../utils/workforceExcel.js"
-      );
+      const { buildWorkforceWorkbook } =
+        await import("../utils/workforceExcel.js");
       const records = visibleEntries.map((payment) => ({
         date: date(payment.paidOn),
         entry: payment.kind.replaceAll("_", " "),
@@ -516,24 +639,97 @@ export function PaymentKhataPage() {
       setError(errorMessage(err));
     }
   };
-  const printLedger = () => {
+  const downloadKhataPdf = async () => {
     if (!selectedWorker) return;
-    const printWindow = window.open("", "_blank", "width=1100,height=800");
-    if (!printWindow) {
-      setError("Allow pop-ups to print or save the labour khata as PDF.");
-      return;
+    setGeneratingPdf(true);
+    setError("");
+    try {
+      const [{ downloadTransactionStatementPdf }, { profile }] =
+        await Promise.all([
+          import("../utils/transactionStatementPdf.js"),
+          request(api.get("/company-profile")),
+        ]);
+      const paymentDates = visibleEntries
+        .map((payment) => new Date(payment.paidOn).toISOString().slice(0, 10))
+        .sort();
+      const periodFrom = from || paymentDates[0] || inputDate();
+      const periodTo =
+        to || paymentDates[paymentDates.length - 1] || periodFrom;
+      downloadTransactionStatementPdf({
+        profile,
+        from: periodFrom,
+        to: periodTo,
+        payments: visibleEntries,
+        title: "LABOUR PAYMENT KHATA",
+        subtitle: [
+          selectedWorker.name,
+          selectedWorker.phone,
+          selectedWorker.companyName,
+          selectedWorker.teamName,
+          selectedWorker.workZone,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        includeWorker: false,
+        includeBalance: true,
+        balanceValue: selectedWorkerBalance,
+        balanceLabel: "CURRENT BALANCE",
+        fileName: `labour-khata-${selectedWorker.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`,
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setGeneratingPdf(false);
     }
-    const rows = visibleEntries
-      .map(
-        (payment) =>
-          `<tr><td>${escapeHtml(date(payment.paidOn))}</td><td>${escapeHtml(payment.kind.replaceAll("_", " "))}${payment.notes ? `<small>${escapeHtml(payment.notes)}</small>` : ""}</td><td>${payment.flow === "INFLOW" ? "—" : escapeHtml(money(payment.amount))}</td><td>${payment.flow === "INFLOW" ? escapeHtml(money(payment.amount)) : "—"}</td><td>${escapeHtml(money(payment.balanceAfter))}</td></tr>`,
-      )
-      .join("");
-    printWindow.document.write(
-      `<!doctype html><html><head><title>${escapeHtml(selectedWorker.name)} labour khata</title><style>body{font:14px Arial,sans-serif;color:#172b29;padding:28px}h1{margin:0 0 6px;font-size:22px}.muted{color:#687976;font-size:12px}.summary{display:flex;gap:12px;margin:20px 0}.summary div{padding:12px 18px;border:1px solid #dce8e5;border-radius:8px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border-bottom:1px solid #dce8e5;padding:10px;text-align:left}th{background:#eef4f5;color:#52656a}small{display:block;color:#71817e;margin-top:4px}.right{text-align:right}@media print{body{padding:0}}</style></head><body><h1>Labour Payment Khata</h1><p class="muted">${escapeHtml(selectedWorker.name)} · ${escapeHtml(selectedWorker.companyName || "No company")} · ${escapeHtml(selectedWorker.workZone || "No zone")}</p><div class="summary"><div>Payable<strong><br/>${escapeHtml(money(selectedWorker.totalPayable))}</strong></div><div>Net given<strong><br/>${escapeHtml(money(selectedWorker.netPaid))}</strong></div><div>Balance<strong><br/>${escapeHtml(money(selectedWorker.totalDue || selectedWorker.overpaid))} ${selectedWorker.totalDue ? "Dena hai" : selectedWorker.overpaid ? "Lena hai" : "Clear"}</strong></div></div><table><thead><tr><th>Date</th><th>Entry</th><th>Diya (₹)</th><th>Liya (₹)</th><th>Balance (₹)</th></tr></thead><tbody>${rows || `<tr><td colspan="5">No entries recorded</td></tr>`}</tbody></table></body></html>`,
-    );
-    printWindow.document.close();
-    printWindow.onload = () => printWindow.print();
+  };
+  const downloadMasterReportPdf = async () => {
+    setGeneratingPdf(true);
+    setReportError("");
+    try {
+      const [{ downloadTransactionStatementPdf }, { profile }] =
+        await Promise.all([
+          import("../utils/transactionStatementPdf.js"),
+          request(api.get("/company-profile")),
+        ]);
+      let runningBalance = 0;
+      const balanceById = new Map();
+      [...reportEntries]
+        .sort(
+          (left, right) =>
+            new Date(left.paidOn).getTime() -
+              new Date(right.paidOn).getTime() ||
+            new Date(left.createdAt || 0).getTime() -
+              new Date(right.createdAt || 0).getTime(),
+        )
+        .forEach((payment) => {
+          runningBalance +=
+            (payment.flow === "INFLOW" ? -1 : 1) *
+            Number(payment.amount || 0);
+          balanceById.set(payment._id, runningBalance);
+        });
+      const payments = reportEntries.map((payment) => ({
+        ...payment,
+        balanceAfter: balanceById.get(payment._id),
+      }));
+      downloadTransactionStatementPdf({
+        profile,
+        from: reportFrom || inputDate(),
+        to: reportTo || inputDate(),
+        payments,
+        title: "ALL LABOUR TRANSACTIONS",
+        subtitle: `${payments.length} entries`,
+        orientation: "landscape",
+        includeWorker: true,
+        includeBalance: true,
+        balanceValue: reportNet,
+        balanceLabel: "PERIOD BALANCE",
+        fileName: `all-labour-transactions-${reportFrom || "all-dates"}-to-${reportTo || "all-dates"}.pdf`,
+      });
+    } catch (err) {
+      setReportError(errorMessage(err));
+    } finally {
+      setGeneratingPdf(false);
+    }
   };
 
   const handleBalanceTab = (value) => {
@@ -565,10 +761,14 @@ export function PaymentKhataPage() {
           </Button>
         }
       />
-      <div className={styles["payment-khata-layout"]}>
+      <div
+        className={`${styles["payment-khata-layout"]} ${
+          selectedWorkerId ? styles["payment-khata-selected"] : ""
+        }`}
+      >
         <Panel
           title="Labour accounts"
-          detail={`${companyFilter || "All companies"} · ${companyWorkers.length} labour profiles`}
+          detail={`${companyFilter || "All companies"} · ${accountWorkers.length} labour profiles`}
           className={styles["payment-khata-list-panel"]}
           action={
             <div className={styles["payment-list-toolbar"]}>
@@ -596,6 +796,48 @@ export function PaymentKhataPage() {
                 ))}
               </select>
               <select
+                aria-label="Team filter"
+                value={teamFilter}
+                onChange={(event) => {
+                  setTeamFilter(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All teams</option>
+                {teams.map((team) => (
+                  <option key={team} value={team}>
+                    {team}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Work zone filter"
+                value={zoneFilter}
+                onChange={(event) => {
+                  setZoneFilter(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All zones</option>
+                {zones.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Labour status filter"
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="ALL">All statuses</option>
+                <option value="ACTIVE">Active labour</option>
+                <option value="INACTIVE">Inactive labour</option>
+              </select>
+              <select
                 aria-label="Sort labour accounts"
                 value={sortOrder}
                 onChange={(event) => setSortOrder(event.target.value)}
@@ -610,7 +852,7 @@ export function PaymentKhataPage() {
         >
           <div className={styles["khata-balance-tabs"]}>
             {[
-              ["ALL", "All labour", companyWorkers.length],
+              ["ALL", "All labour", accountWorkers.length],
               ["DUE", "Dena hai", dueCount],
               ["OVERPAID", "Lena hai", overpaidCount],
             ].map(([value, label, count]) => (
@@ -634,10 +876,10 @@ export function PaymentKhataPage() {
             <Button
               type="button"
               className={styles["button-secondary"]}
-              onClick={() => navigate(`/labour/reports?worker=${selectedWorkerId}`)}
-              disabled={!selectedWorkerId}
+              onClick={loadMasterReport}
+              disabled={reportLoading}
             >
-              View report
+              {reportLoading ? "Loading report…" : "Report dekhein"}
             </Button>
           </div>
           <div className={styles["khata-worker-list"]}>
@@ -663,7 +905,10 @@ export function PaymentKhataPage() {
                     <span className={styles["khata-worker-info"]}>
                       <strong>{worker.name}</strong>
                       <small>
-                        {[showCompany ? worker.companyName : "", showZone ? worker.workZone : ""]
+                        {[
+                          showCompany ? worker.companyName : "",
+                          showZone ? worker.workZone : "",
+                        ]
                           .filter(Boolean)
                           .join(" · ") || worker.phone}
                       </small>
@@ -685,7 +930,10 @@ export function PaymentKhataPage() {
                 );
               })
             ) : (
-              <Empty title="No matching labour accounts" detail="Change the filters or search terms." />
+              <Empty
+                title="No matching labour accounts"
+                detail="Change the filters or search terms."
+              />
             )}
           </div>
           <div className={styles["khata-list-footer"]}>
@@ -742,9 +990,7 @@ export function PaymentKhataPage() {
         <Panel
           className={styles["payment-khata-detail-panel"]}
           title={
-            selectedWorker
-              ? selectedWorker.name
-              : "Select a labour account"
+            selectedWorker ? selectedWorker.name : "Select a labour account"
           }
           detail={
             selectedWorker
@@ -756,6 +1002,14 @@ export function PaymentKhataPage() {
           action={
             selectedWorker && (
               <div className={styles["khata-detail-actions"]}>
+                <Button
+                  type="button"
+                  icon={ArrowLeft}
+                  className={`${styles["button-ghost"]} ${styles["khata-mobile-back"]}`}
+                  onClick={() => setSelectedWorkerId("")}
+                >
+                  Labour accounts
+                </Button>
                 <Button
                   type="button"
                   icon={MessageCircle}
@@ -775,11 +1029,12 @@ export function PaymentKhataPage() {
                 </Button>
                 <Button
                   type="button"
-                  icon={Printer}
+                  icon={FileDown}
                   className={styles["button-pdf"]}
-                  onClick={printLedger}
+                  onClick={downloadKhataPdf}
+                  loading={generatingPdf}
                 >
-                  PDF / Print
+                  Download PDF
                 </Button>
                 <Button
                   type="button"
@@ -889,11 +1144,11 @@ export function PaymentKhataPage() {
                     {visibleEntries.map((payment) => (
                       <tr key={payment._id}>
                         <td>
-                          <strong>{date(payment.paidOn)} · {payment.method}</strong>
+                          <strong>
+                            {date(payment.paidOn)} · {payment.method}
+                          </strong>
                           <Status
-                            tone={
-                              payment.flow === "INFLOW" ? "green" : "blue"
-                            }
+                            tone={payment.flow === "INFLOW" ? "green" : "blue"}
                           >
                             {payment.flow === "INFLOW"
                               ? "Liya · You got"
@@ -970,8 +1225,13 @@ export function PaymentKhataPage() {
                 </table>
               </div>
               <div className={styles["khata-ledger-footer"]}>
-                <span>Given in period: <strong>{money(givenInEntries)}</strong></span>
-                <span>Received in period: <strong>{money(receivedInEntries)}</strong></span>
+                <span>
+                  Given in period: <strong>{money(givenInEntries)}</strong>
+                </span>
+                <span>
+                  Received in period:{" "}
+                  <strong>{money(receivedInEntries)}</strong>
+                </span>
               </div>
               <div className={styles["khata-quick-actions"]}>
                 <Button
@@ -996,7 +1256,11 @@ export function PaymentKhataPage() {
             <>
               <ErrorNote error={error} />
               <Empty
-                title={loadingWorkers ? "Loading labour accounts…" : "No labour accounts yet"}
+                title={
+                  loadingWorkers
+                    ? "Loading labour accounts…"
+                    : "No labour accounts yet"
+                }
                 detail="Add a labour profile to start recording payments."
               />
               {!loadingWorkers && (
@@ -1017,63 +1281,205 @@ export function PaymentKhataPage() {
         <div ref={recycleBinRef} className={styles["payment-recycle-anchor"]}>
           <Panel
             title="Payment recycle bin"
-            detail="Deleted payment entries can be restored."
+            detail="Restore deleted entries or permanently remove them."
             className={styles["payment-recycle-panel"]}
           >
             <div className={styles["table-wrap"]}>
               <table>
-              <thead>
-                <tr>
-                  <th>Labour</th>
-                  <th>Type</th>
-                  <th>Amount</th>
-                  <th>Deleted</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {deletedPayments.map((payment) => (
-                  <tr key={payment._id}>
-                    <td>{payment.worker?.name || "Labour"}</td>
-                    <td>{payment.kind}</td>
-                    <td>{money(payment.amount)}</td>
-                    <td>{date(payment.deletedAt)}</td>
-                    <td>
-                      <Button
-                        type="button"
-                        className={styles["button-secondary"]}
-                        onClick={async () => {
-                          try {
-                            await request(
-                              api.patch(`/payments/${payment._id}/restore`),
-                            );
-                            await Promise.all([
-                              loadDeletedPayments(),
-                              loadWorkers(),
-                              loadPayments(),
-                            ]);
-                          } catch (err) {
-                            setError(errorMessage(err));
-                          }
-                        }}
-                      >
-                        Restore
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {!deletedPayments.length && (
+                <thead>
                   <tr>
-                    <td colSpan="5">
-                      <Empty title="Recycle bin empty" />
-                    </td>
+                    <th>Labour</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Deleted</th>
+                    <th />
                   </tr>
-                )}
-              </tbody>
+                </thead>
+                <tbody>
+                  {deletedPayments.map((payment) => (
+                    <tr key={payment._id}>
+                      <td>{payment.worker?.name || "Labour"}</td>
+                      <td>{payment.kind}</td>
+                      <td>{money(payment.amount)}</td>
+                      <td>{date(payment.deletedAt)}</td>
+                      <td>
+                        <div className={styles["payment-recycle-actions"]}>
+                          <Button
+                            type="button"
+                            className={styles["button-secondary"]}
+                            onClick={async () => {
+                              try {
+                                await request(
+                                  api.patch(`/payments/${payment._id}/restore`),
+                                );
+                                notifyPaymentDataChanged();
+                                await Promise.all([
+                                  loadDeletedPayments(),
+                                  loadWorkers(),
+                                  loadPayments(),
+                                ]);
+                              } catch (err) {
+                                setError(errorMessage(err));
+                              }
+                            }}
+                          >
+                            Restore
+                          </Button>
+                          <Button
+                            type="button"
+                            className={styles["button-danger"]}
+                            icon={Trash2}
+                            aria-label={`Permanently delete payment of ${money(payment.amount)} for ${payment.worker?.name || "Labour"}`}
+                            onClick={() => setPermanentlyDeleting(payment)}
+                          >
+                            Delete permanently
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!deletedPayments.length && (
+                    <tr>
+                      <td colSpan="5">
+                        <Empty title="Recycle bin empty" />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
               </table>
             </div>
           </Panel>
         </div>
+      )}
+
+      {reportOpen && (
+        <Modal
+          wide
+          className={styles["khata-report-modal"]}
+          title="All transactions"
+          action={
+            <Button
+              type="button"
+              icon={FileDown}
+              className={styles["button-secondary"]}
+              onClick={downloadMasterReportPdf}
+              loading={generatingPdf}
+            >
+              Download PDF
+            </Button>
+          }
+          onClose={() => setReportOpen(false)}
+        >
+          <ErrorNote error={reportError} />
+          <div className={styles["khata-report-filters"]}>
+            <Field label="From date">
+              <input
+                type="date"
+                value={reportFrom}
+                max={reportTo || undefined}
+                onChange={(event) => setReportFrom(event.target.value)}
+              />
+            </Field>
+            <Field label="To date">
+              <input
+                type="date"
+                value={reportTo}
+                min={reportFrom || undefined}
+                onChange={(event) => setReportTo(event.target.value)}
+              />
+            </Field>
+            <div className={styles["khata-report-search"]}>
+              <span>Search entries</span>
+              <SearchBox
+                value={reportSearch}
+                onChange={setReportSearch}
+                placeholder="Search type, note, reference…"
+              />
+            </div>
+            <Field label="Sort entries">
+              <select
+                value={reportSort}
+                onChange={(event) => setReportSort(event.target.value)}
+              >
+                <option value="NEWEST">Newest first</option>
+                <option value="OLDEST">Oldest first</option>
+              </select>
+            </Field>
+          </div>
+          <div className={styles["khata-report-balance"]}>
+            <span>Net transaction balance</span>
+            <strong
+              className={
+                reportNet > 0
+                  ? styles["dena-hai"]
+                  : reportNet < 0
+                    ? styles["lena-hai"]
+                    : ""
+              }
+            >
+              {money(Math.abs(reportNet))}
+              {reportNet > 0
+                ? " · Diya zyada"
+                : reportNet < 0
+                  ? " · Liya zyada"
+                  : " · Clear"}
+            </strong>
+          </div>
+          <div className={styles["khata-report-summary"]}>
+            <div className={styles["khata-report-count"]}>
+              <span>Entries</span>
+              <strong>{reportEntries.length}</strong>
+            </div>
+            <div className={styles["khata-report-total"]}>
+              <span>Diya (₹)</span>
+              <strong>{money(reportGiven)}</strong>
+            </div>
+            <div className={styles["khata-report-total"]}>
+              <span>Liya (₹)</span>
+              <strong>{money(reportReceived)}</strong>
+            </div>
+          </div>
+          <div className={styles["khata-report-list"]}>
+            {reportEntries.map((payment) => (
+              <article
+                className={styles["khata-report-entry"]}
+                key={payment._id}
+              >
+                <div className={styles["khata-report-entry-info"]}>
+                  <strong>
+                    {payment.worker?.name || "Company expense"} ·{" "}
+                    {payment.kind.replaceAll("_", " ")}
+                  </strong>
+                  <span>{date(payment.paidOn)} · {payment.method}</span>
+                  {(payment.notes || payment.reference) && (
+                    <small>
+                      {[payment.notes, payment.reference]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </small>
+                  )}
+                </div>
+                <div className={styles["khata-report-amounts"]}>
+                  <div>
+                    <span>Diya</span>
+                    <strong className={styles["payment-given"]}>
+                      {payment.flow === "INFLOW" ? "—" : money(payment.amount)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Liya</span>
+                    <strong className={styles["payment-received"]}>
+                      {payment.flow === "INFLOW" ? money(payment.amount) : "—"}
+                    </strong>
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!reportEntries.length && (
+              <Empty title="No entries for these dates or search" />
+            )}
+          </div>
+        </Modal>
       )}
 
       {addingFlow && (
@@ -1118,6 +1524,7 @@ export function PaymentKhataPage() {
                 setDeletingBusy(true);
                 try {
                   await request(api.delete(`/payments/${deleting._id}`));
+                  notifyPaymentDataChanged();
                   setDeleting(null);
                   await Promise.all([loadWorkers(), loadPayments()]);
                 } catch (err) {
@@ -1132,6 +1539,22 @@ export function PaymentKhataPage() {
             </Button>
           </div>
         </Modal>
+      )}
+      {permanentlyDeleting && (
+        <DeleteConfirm
+          itemLabel={`${money(permanentlyDeleting.amount)} payment for ${permanentlyDeleting.worker?.name || "Labour"}`}
+          onClose={() => setPermanentlyDeleting(null)}
+          onConfirm={async () => {
+            await request(
+              api.delete(`/payments/${permanentlyDeleting._id}/permanent`),
+            );
+            notifyPaymentDataChanged();
+            setDeletedPayments((current) =>
+              current.filter((payment) => payment._id !== permanentlyDeleting._id),
+            );
+            setPermanentlyDeleting(null);
+          }}
+        />
       )}
       {settingsOpen && (
         <Modal

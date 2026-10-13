@@ -47,9 +47,12 @@ function MonthlyAttendance() {
   });
   const [cells, setCells] = useState({});
   const [drafts, setDrafts] = useState({});
+  const [workerSearch, setWorkerSearch] = useState("");
+  const [workerStatus, setWorkerStatus] = useState("ACTIVE");
   const [periodWorker, setPeriodWorker] = useState("");
   const [periodTeam, setPeriodTeam] = useState("");
   const [periodCompany, setPeriodCompany] = useState("");
+  const [periodZone, setPeriodZone] = useState("");
   const [workerPage, setWorkerPage] = useState(1);
   const [workerPageSize, setWorkerPageSize] = useState(20);
   const [periodStart, setPeriodStart] = useState(`${defaultMonth()}-01`);
@@ -150,7 +153,15 @@ function MonthlyAttendance() {
 
   useEffect(() => {
     setWorkerPage(1);
-  }, [month, periodWorker, periodTeam, periodCompany]);
+  }, [
+    month,
+    workerSearch,
+    workerStatus,
+    periodWorker,
+    periodTeam,
+    periodCompany,
+    periodZone,
+  ]);
 
   const teams = useMemo(
     () =>
@@ -170,10 +181,29 @@ function MonthlyAttendance() {
       ].sort(),
     [data.workers],
   );
+  const zones = useMemo(
+    () =>
+      [
+        ...new Set(
+          data.workers
+            .map((worker) => worker.workZone?.trim())
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [data.workers],
+  );
   const workerMatches = (worker) =>
+    (workerStatus === "ALL" ||
+      (workerStatus === "ACTIVE" ? worker.active : !worker.active)) &&
+    [worker.name, worker.phone].some((value) =>
+      String(value || "")
+        .toLocaleLowerCase()
+        .includes(workerSearch.trim().toLocaleLowerCase()),
+    ) &&
     (!periodWorker || worker._id === periodWorker) &&
     (!periodTeam || worker.teamName === periodTeam) &&
-    (!periodCompany || worker.companyName === periodCompany);
+    (!periodCompany || worker.companyName === periodCompany) &&
+    (!periodZone || worker.workZone?.trim() === periodZone);
   const filteredWorkers = data.workers.filter(workerMatches);
   const workerPageCount = Math.max(
     1,
@@ -445,7 +475,7 @@ function MonthlyAttendance() {
       <Panel
         className={`${styles["attendance-month-panel"]}`}
         title="Labour monthly grid"
-        detail={`${data.workers.length} active workers · ${data.locked ? "Locked" : "Open"}`}
+        detail={`${filteredWorkers.length} matching workers · ${data.locked ? "Locked" : "Open"}`}
         action={
           <div className={`${styles["actions-inline"]}`}>
             <button
@@ -481,6 +511,11 @@ function MonthlyAttendance() {
         }
       >
         <div className={`${styles["toolbar"]}`}>
+          <SearchBox
+            value={workerSearch}
+            onChange={setWorkerSearch}
+            placeholder="Search name or mobile number"
+          />
           <Field label="Month">
             <input
               type="month"
@@ -491,7 +526,15 @@ function MonthlyAttendance() {
           <Field label="Worker filter">
             <select
               value={periodWorker}
-              onChange={(event) => setPeriodWorker(event.target.value)}
+              onChange={(event) => {
+                const selectedWorker = data.workers.find(
+                  (worker) => worker._id === event.target.value,
+                );
+                if (selectedWorker) {
+                  setWorkerStatus(selectedWorker.active ? "ACTIVE" : "INACTIVE");
+                }
+                setPeriodWorker(event.target.value);
+              }}
             >
               <option value="">All labour</option>
               {data.workers.map((worker) => (
@@ -499,6 +542,19 @@ function MonthlyAttendance() {
                   {worker.name}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Worker status">
+            <select
+              value={workerStatus}
+              onChange={(event) => {
+                setWorkerStatus(event.target.value);
+                setPeriodWorker("");
+              }}
+            >
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="ALL">All statuses</option>
             </select>
           </Field>
           <Field label="Team filter">
@@ -523,6 +579,19 @@ function MonthlyAttendance() {
               {companies.map((company) => (
                 <option key={company} value={company}>
                   {company}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Zone filter">
+            <select
+              value={periodZone}
+              onChange={(event) => setPeriodZone(event.target.value)}
+            >
+              <option value="">All zones</option>
+              {zones.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
                 </option>
               ))}
             </select>
@@ -740,7 +809,11 @@ function MonthlyAttendance() {
             </table>
             {!filteredWorkers.length && (
               <Empty
-                title={data.workers.length ? "No workers match these filters" : "No active workers"}
+                title={
+                  data.workers.length
+                    ? "No workers match these filters"
+                    : "No workers found"
+                }
               />
             )}
           </div>

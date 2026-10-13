@@ -32,7 +32,14 @@ export function Panel({ title, detail, action, children, className = "" }) {
   );
 }
 
-export function Modal({ title, children, onClose, wide = false, action }) {
+export function Modal({
+  title,
+  children,
+  onClose,
+  wide = false,
+  action,
+  className = "",
+}) {
   return (
     <div
       className={`${styles["modal-backdrop"]}`}
@@ -40,7 +47,7 @@ export function Modal({ title, children, onClose, wide = false, action }) {
       onMouseDown={onClose}
     >
       <section
-        className={`${styles["modal"]} ${wide ? styles["modal-wide"] : ""}`}
+        className={`${styles["modal"]} ${wide ? styles["modal-wide"] : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         onMouseDown={(event) => event.stopPropagation()}

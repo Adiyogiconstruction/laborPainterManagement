@@ -30,6 +30,38 @@ export default function App() {
       })
       .finally(() => setChecking(false));
   }, []);
+  useEffect(() => {
+    if (!session) return undefined;
+    let active = true;
+    let heartbeatInProgress = false;
+    const heartbeat = async () => {
+      if (heartbeatInProgress) return;
+      heartbeatInProgress = true;
+      try {
+        await api.post("/auth/session/heartbeat");
+      } catch (error) {
+        if (error.response?.status === 401 && active) {
+          setSession(null);
+          navigate("/");
+        } else {
+          console.error("Unable to update administrator activity.", error);
+        }
+      } finally {
+        heartbeatInProgress = false;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") heartbeat();
+    };
+    heartbeat();
+    const intervalId = window.setInterval(heartbeat, 10 * 60 * 1000);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [session, navigate]);
   const authenticated = (data) => {
     if (!isValidSession(data)) throw new Error("Invalid login response.");
     const { user } = data;

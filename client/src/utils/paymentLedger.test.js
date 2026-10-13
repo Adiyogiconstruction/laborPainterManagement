@@ -12,8 +12,11 @@ const workers = [
   {
     _id: "due-2",
     name: "Bina",
+    active: true,
     phone: "98765",
     companyName: "BuildCo",
+    teamName: "Alpha",
+    workZone: "North",
     totalDue: 200,
     overpaid: 0,
     lastPaymentOn: "2026-10-01",
@@ -21,8 +24,11 @@ const workers = [
   {
     _id: "due-1",
     name: "Aman",
+    active: false,
     phone: "91234",
     companyName: "BuildCo",
+    teamName: "Beta",
+    workZone: "South",
     totalDue: 600,
     overpaid: 0,
     lastPaymentOn: "2026-09-01",
@@ -30,8 +36,11 @@ const workers = [
   {
     _id: "over",
     name: "Chirag",
+    active: true,
     phone: "90000",
     companyName: "OtherCo",
+    teamName: "Alpha",
+    workZone: "North",
     totalDue: 0,
     overpaid: 150,
     lastPaymentOn: "2026-10-03",
@@ -66,6 +75,26 @@ test("payment ledger filters, balance categories, and sort order are consistent"
       (worker) => worker._id,
     ),
     ["over"],
+  );
+  assert.deepEqual(
+    filterAndSortWorkers(workers, {
+      company: "BuildCo",
+      team: "Alpha",
+      zone: "North",
+    }).map((worker) => worker._id),
+    ["due-2"],
+  );
+  assert.deepEqual(
+    filterAndSortWorkers(workers, { status: "ACTIVE" }).map(
+      (worker) => worker._id,
+    ),
+    ["over", "due-2"],
+  );
+  assert.deepEqual(
+    filterAndSortWorkers(workers, { status: "INACTIVE" }).map(
+      (worker) => worker._id,
+    ),
+    ["due-1"],
   );
 });
 

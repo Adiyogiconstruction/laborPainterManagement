@@ -14,6 +14,13 @@ const attendanceSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CompanyClient",
+      default: null,
+      index: true,
+    },
+    companyName: { type: String, trim: true, maxlength: 150, default: "" },
     date: { type: Date, required: true, index: true },
     status: {
       type: String,

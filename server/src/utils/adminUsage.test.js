@@ -44,6 +44,7 @@ test("sums only session time overlapping the selected period", () => {
       },
       {
         startedAt: "2026-10-08T20:30:00.000Z",
+        lastSeenAt: "2026-10-08T21:29:00.000Z",
         endedAt: null,
         expiresAt: "2026-10-09T04:30:00.000Z",
       },
@@ -60,11 +61,12 @@ test("sums only session time overlapping the selected period", () => {
   });
 });
 
-test("caps sessions without logout at session expiry", () => {
+test("stops sessions without a recent heartbeat at their last activity check", () => {
   const result = summarizeAdminUsage(
     [
       {
         startedAt: "2026-10-09T00:00:00.000Z",
+        lastSeenAt: "2026-10-09T07:50:00.000Z",
         endedAt: null,
         expiresAt: "2026-10-09T08:00:00.000Z",
       },
@@ -75,8 +77,30 @@ test("caps sessions without logout at session expiry", () => {
   );
 
   assert.deepEqual(result, {
-    totalMilliseconds: 8 * 60 * 60 * 1000,
+    totalMilliseconds: 7 * 60 * 60 * 1000 + 50 * 60 * 1000,
     sessionCount: 1,
     activeSessionCount: 0,
+  });
+});
+
+test("counts a recent heartbeat as active through the current time", () => {
+  const result = summarizeAdminUsage(
+    [
+      {
+        startedAt: "2026-10-09T00:00:00.000Z",
+        lastSeenAt: "2026-10-09T07:55:00.000Z",
+        endedAt: null,
+        expiresAt: "2026-10-09T08:30:00.000Z",
+      },
+    ],
+    "2026-10-09T00:00:00.000Z",
+    "2026-10-10T00:00:00.000Z",
+    "2026-10-09T08:00:00.000Z",
+  );
+
+  assert.deepEqual(result, {
+    totalMilliseconds: 8 * 60 * 60 * 1000,
+    sessionCount: 1,
+    activeSessionCount: 1,
   });
 });
