@@ -8,7 +8,6 @@ import {
   RotateCcw,
   Trash2,
   FileDown,
-  Printer,
   Search,
   ChevronDown,
 } from "lucide-react";
@@ -200,6 +199,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   const [exporting, setExporting] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(10);
+  const [detailRefresh, setDetailRefresh] = useState(0);
   const [companyOverview, setCompanyOverview] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -289,7 +289,6 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     let current = true;
     setDetailLoading(true);
     setDetailError("");
-    setCompanyOverview(null);
     request(
       api.get(`/companies/${selectedCompanyId}/overview`, {
         params: {
@@ -325,7 +324,13 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     appliedSelectedWorkers,
     detailPage,
     detailPageSize,
+    detailRefresh,
   ]);
+  const overviewMatchesCompany = Boolean(
+    companyOverview &&
+      selectedCompanyId &&
+      String(companyOverview.company?.id || "") === String(selectedCompanyId),
+  );
 
   useEffect(() => {
     if (!isOwner) return undefined;
@@ -500,48 +505,6 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     }
   };
 
-  const printReport = async () => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      setDetailError("Allow pop-ups to print this report.");
-      return;
-    }
-    try {
-      const rows = await loadAllReportWorkers();
-      const escapeHtml = (value) =>
-        String(value ?? "").replace(/[&<>"']/g, (character) => ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        })[character]);
-      const tableRows = rows.map((row) => `
-        <tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.team)}</td><td>${escapeHtml(row.zone)}</td>
-        <td>${row.days}</td><td>${row.overtimeHours}</td><td>${money(row.companyBilling)}</td>
-        <td>${money(row.labourSalary)}</td><td>${money(row.companyBilling - row.labourSalary)}</td></tr>`).join("");
-      printWindow.document.write(`<!doctype html><html><head><title>Labour-wise Profit Sheet</title>
-        <style>body{font:12px Arial;color:#172c26;padding:24px}h1{font-size:20px}p{color:#52635e}
-        table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #ccd8d4;padding:7px;text-align:left}
-        th{background:#ecf5f0}@media print{body{padding:0}}</style></head><body>
-        <h1>${escapeHtml(companyOverview.company.name)} · Labour-wise Profit Sheet</h1>
-        <p>${escapeHtml(appliedDetailRange.from)} to ${escapeHtml(appliedDetailRange.to)} · ${escapeHtml(appliedDetailZone || "All zones")} · ${escapeHtml(appliedDetailTeam || "All teams")}</p>
-        <table><thead><tr><th>Labour</th><th>Team</th><th>Zone</th><th>Days</th><th>OT hours</th><th>Company billing</th><th>Labour salary</th><th>Profit</th></tr></thead>
-        <tbody>${tableRows}</tbody></table>
-        <p>Company billing: ${escapeHtml(money(companyOverview.totals.companyBilling))} ·
-        Labour salary: ${escapeHtml(money(companyOverview.totals.labourSalary))} ·
-        Duty profit: ${escapeHtml(money(companyOverview.totals.dutyProfit))} ·
-        OT profit: ${escapeHtml(money(companyOverview.totals.overtimeProfit))} ·
-        Total profit: ${escapeHtml(money(companyOverview.totals.margin))}</p></body></html>`);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-    } catch (err) {
-      printWindow.close();
-      setDetailError(errorMessage(err));
-    }
-  };
-
   const availableLabours = (companyOverview?.labourOptions || []).filter(
     (labour) =>
       (!detailTeam || labour.team === detailTeam) &&
@@ -648,6 +611,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       resetForm();
       await load();
       setProfitRefresh((value) => value + 1);
+      setDetailRefresh((value) => value + 1);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -1263,21 +1227,23 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               </Button>
             </div>
             <div className={styles["company-report-exports"]}>
-              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={exportReportPdf}>
+              <Button type="button" className={styles["button-secondary"]} disabled={exporting || detailLoading || Boolean(detailError) || !overviewMatchesCompany} onClick={exportReportPdf}>
                 <FileDown size={15} /> PDF
               </Button>
-              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={exportReportExcel}>
+              <Button type="button" className={styles["button-secondary"]} disabled={exporting || detailLoading || Boolean(detailError) || !overviewMatchesCompany} onClick={exportReportExcel}>
                 <FileDown size={15} /> Excel
-              </Button>
-              <Button type="button" className={styles["button-secondary"]} disabled={exporting || !companyOverview} onClick={printReport}>
-                <Printer size={15} /> Print
               </Button>
             </div>
           </div>
-          {detailLoading && !companyOverview ? (
+          {detailLoading && !overviewMatchesCompany ? (
             <Empty title="Loading company details…" />
-          ) : companyOverview ? (
+          ) : overviewMatchesCompany ? (
             <>
+              {detailLoading && (
+                <p role="status" aria-live="polite">
+                  Updating the report with the selected filters…
+                </p>
+              )}
               <div className={styles["company-detail-summary"]}>
                 {[
                   ["Company rate / day", rateLabel(companyOverview.rateSummary.companyDaily), "billing"],
@@ -1435,6 +1401,8 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                 </div>
               </div>
             </>
+          ) : detailError ? (
+            <Empty title="Unable to load the labour profitability report" />
           ) : (
             <Empty title="Select a company to view its labour details" />
           )}

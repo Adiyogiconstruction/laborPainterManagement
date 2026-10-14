@@ -171,6 +171,7 @@ export function ReportsPage() {
         from,
         to,
         payments: data.payments,
+        includeSerialNumber: true,
       });
     } catch (err) {
       setError(errorMessage(err));
@@ -583,6 +584,7 @@ export function ReportsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className="reports-pdf-serial">Sr. No.</th>
                   <th>Worker</th>
                   <th>Present</th>
                   <th>2P</th>
@@ -596,7 +598,7 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {attendancePage.rows.map((worker) => {
+                {attendancePage.rows.map((worker, index) => {
                   const isExpanded = expandedWorker === worker.workerId;
                   const dailyPage = rowsForPage(
                     `attendance-days-${worker.workerId}`,
@@ -605,6 +607,9 @@ export function ReportsPage() {
                   return (
                     <Fragment key={worker.workerId}>
                       <tr>
+                        <td className="reports-pdf-serial">
+                          {(attendancePage.page - 1) * pageSize + index + 1}
+                        </td>
                         <td>
                           <strong>{worker.workerName}</strong>
                           <small>
@@ -644,11 +649,12 @@ export function ReportsPage() {
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td colSpan="9">
+                          <td colSpan="10">
                             <div className={`${styles["table-wrap"]}`}>
                               <table>
                                 <thead>
                                   <tr>
+                                    <th className="reports-pdf-serial">Sr. No.</th>
                                     <th>Date</th>
                                     <th>Status</th>
                                     <th>Work units</th>
@@ -656,10 +662,13 @@ export function ReportsPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {dailyPage.rows.map((record) => (
+                                  {dailyPage.rows.map((record, recordIndex) => (
                                     <tr
                                       key={`${worker.workerId}-${record.date}`}
                                     >
+                                      <td className="reports-pdf-serial">
+                                        {(dailyPage.page - 1) * pageSize + recordIndex + 1}
+                                      </td>
                                       <td>{date(record.date)}</td>
                                       <td>
                                         {record.status.replaceAll("_", " ")}
@@ -691,7 +700,8 @@ export function ReportsPage() {
                 })}
                 {!attendanceData?.workerSummaries?.length && (
                   <tr>
-                    <td colSpan="9">
+                    <td className="reports-pdf-serial" />
+                    <td colSpan="10">
                       <Empty title="No active labour for this filter" />
                     </td>
                   </tr>
@@ -748,6 +758,7 @@ export function ReportsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className="reports-pdf-serial">Sr. No.</th>
                   <th>Date</th>
                   <th>Name</th>
                   <th>Details</th>
@@ -756,8 +767,11 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {transactionPage.rows.map((payment) => (
+                {transactionPage.rows.map((payment, index) => (
                   <tr key={payment._id}>
+                    <td className="reports-pdf-serial">
+                      {(transactionPage.page - 1) * pageSize + index + 1}
+                    </td>
                     <td>{date(payment.paidOn)}</td>
                     <td>{payment.worker?.name || "Business expense"}</td>
                     <td>
@@ -776,6 +790,7 @@ export function ReportsPage() {
                 ))}
                 {!data?.payments?.length && (
                   <tr>
+                    <td className="reports-pdf-serial" />
                     <td colSpan="5">
                       <Empty title="No transactions for this filter" />
                     </td>
@@ -815,6 +830,7 @@ export function ReportsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className="reports-pdf-serial">Sr. No.</th>
                   <th>Date</th>
                   <th>Worker</th>
                   <th>Type</th>
@@ -823,8 +839,11 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {payrollPage.rows.map((payment) => (
+                {payrollPage.rows.map((payment, index) => (
                   <tr key={payment._id}>
+                    <td className="reports-pdf-serial">
+                      {(payrollPage.page - 1) * pageSize + index + 1}
+                    </td>
                     <td>{date(payment.paidOn)}</td>
                     <td>{payment.worker?.name || "Business expense"}</td>
                     <td>
@@ -848,6 +867,7 @@ export function ReportsPage() {
                 ))}
                 {!data?.payments?.length && (
                   <tr>
+                    <td className="reports-pdf-serial" />
                     <td colSpan="5">
                       <Empty title="No payments for this filter" />
                     </td>
@@ -937,8 +957,11 @@ export function ReportsPage() {
               key={dimension}
             >
               <div className={`${styles["report-rank-list"]}`}>
-                {rows.map(([label, count]) => (
+                {rows.map(([label, count], index) => (
                   <div key={label}>
+                    <small className="reports-pdf-rank-serial">
+                      {(page - 1) * pageSize + index + 1}.
+                    </small>
                     <strong>{label}</strong>
                     <span>{count}</span>
                   </div>
@@ -974,6 +997,7 @@ export function ReportsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className="reports-pdf-serial">Sr. No.</th>
                   <th>Worker</th>
                   <th>Unmarked</th>
                   <th>Absent</th>
@@ -983,8 +1007,11 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {exceptionPage.rows.map((item) => (
+                {exceptionPage.rows.map((item, index) => (
                   <tr key={item.workerId}>
+                    <td className="reports-pdf-serial">
+                      {(exceptionPage.page - 1) * pageSize + index + 1}
+                    </td>
                     <td>
                       <strong>{item.workerName}</strong>
                     </td>
@@ -997,6 +1024,7 @@ export function ReportsPage() {
                 ))}
                 {!analyticsData.exceptions?.length && (
                   <tr>
+                    <td className="reports-pdf-serial" />
                     <td colSpan="6">
                       <Empty title="No attendance exceptions" />
                     </td>
@@ -1050,6 +1078,7 @@ export function ReportsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className="reports-pdf-serial">Sr. No.</th>
                   <th>Worker</th>
                   <th>Company</th>
                   <th>Team</th>
@@ -1066,8 +1095,11 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {managementPage.rows.map((worker) => (
+                {managementPage.rows.map((worker, index) => (
                   <tr key={worker.workerId}>
+                    <td className="reports-pdf-serial">
+                      {(managementPage.page - 1) * pageSize + index + 1}
+                    </td>
                     <td><strong>{worker.workerName}</strong></td>
                     <td>{worker.company}</td>
                     <td>{worker.team}</td>
@@ -1085,6 +1117,7 @@ export function ReportsPage() {
                 ))}
                 {!analyticsData.managementWorkers?.length && (
                   <tr>
+                    <td className="reports-pdf-serial" />
                     <td colSpan="13">
                       <Empty title="No workers match these filters" />
                     </td>

@@ -4,6 +4,7 @@ import {
   currentUsageDate,
   getUsageDateRange,
   getUsagePeriodRange,
+  splitUsageIntervalByIndiaDate,
   summarizeAdminUsage,
   summarizeAdminUsageByDay,
 } from "./adminUsage.js";
@@ -29,6 +30,26 @@ test("returns India-local day, Monday-based week, month and year boundaries", ()
 
 test("defaults usage reports to the current India-local date", () => {
   assert.equal(currentUsageDate("2026-10-08T20:00:00.000Z"), "2026-10-09");
+});
+
+test("splits activity pulse intervals at India-local midnight", () => {
+  assert.deepEqual(
+    splitUsageIntervalByIndiaDate(
+      "2026-10-08T18:29:30.000Z",
+      "2026-10-08T18:30:30.000Z",
+    ),
+    [
+      { date: "2026-10-08", milliseconds: 30_000 },
+      { date: "2026-10-09", milliseconds: 30_000 },
+    ],
+  );
+  assert.deepEqual(
+    splitUsageIntervalByIndiaDate(
+      "2026-10-08T18:30:00.000Z",
+      "2026-10-08T18:29:00.000Z",
+    ),
+    [],
+  );
 });
 
 test("rejects invalid dates and unsupported period values", () => {

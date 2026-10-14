@@ -102,6 +102,22 @@ const exportColumns = [
   ["Notes", "notes"],
 ];
 
+const pdfExportColumns = [
+  ["Company", "companyName"],
+  ["Team", "teamName"],
+  ["Photo", "photo"],
+  ["Contact Number", "phone"],
+  ["Skill", "skill"],
+  ["PPE Given", "ppeKitIssuedOn"],
+  ["Work Zone", "workZone"],
+  ["Default Rate / Day", "defaultDailyRate"],
+  ["OT Rate / Hour", "overtimeHourlyRate"],
+  ["Status", "active"],
+  ["Payable", "totalPayable"],
+  ["Joining Date", "joiningDate"],
+  ["Net Paid", "netPaid"],
+];
+
 const exportValue = (worker, key) => {
   if (key === "active") {
     const status =
@@ -115,6 +131,9 @@ const exportValue = (worker, key) => {
   if (key === "joiningDate" || key === "ppeKitIssuedOn") {
     return worker[key] ? date(worker[key]) : "";
   }
+  if (key === "totalPayable" || key === "netPaid") {
+    return worker[key] == null ? "" : money(worker[key]);
+  }
   return worker[key] ?? "";
 };
 
@@ -125,20 +144,36 @@ const htmlValue = (value) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-function printWorkers(workers, type, profile = null) {
-  const printWindow = window.open("", "_blank", "width=1200,height=800");
-  if (!printWindow) return;
+function printWorkers(
+  workers,
+  type,
+  profile = null,
+  selectedColumns = [],
+  printWindow,
+) {
+  if (!printWindow) {
+    throw new Error("Allow pop-ups to generate the workforce PDF.");
+  }
+  const columns = pdfExportColumns.filter(([, key]) =>
+    selectedColumns.includes(key),
+  );
   const headers = [
     "<th>Sr. No.</th>",
-    ...exportColumns.map(([label]) => `<th>${label}</th>`),
+    "<th>Labour Name</th>",
+    ...columns.map(([label]) => `<th>${htmlValue(label)}</th>`),
   ].join("");
   const rows = workers
     .map(
       (worker, index) =>
-        `<tr><td>${index + 1}</td>${exportColumns
+        `<tr><td>${index + 1}</td><td>${htmlValue(worker.name)}</td>${columns
           .map(
-            ([, key]) =>
-              `<td>${String(exportValue(worker, key)).replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</td>`,
+            ([, key]) => {
+              if (key === "photo") {
+                const photo = worker.photoUrl || worker.photoPath;
+                return `<td>${photo ? `<img class="worker-photo" src="${htmlValue(imageUrl(worker, "photoUrl", "photoPath"))}" alt="${htmlValue(worker.name)}" onerror="this.style.display='none'"/>` : ""}</td>`;
+              }
+              return `<td>${htmlValue(exportValue(worker, key))}</td>`;
+            },
           )
           .join("")}</tr>`,
     )
@@ -160,12 +195,17 @@ function printWorkers(workers, type, profile = null) {
     .join(" | ");
 
   printWindow.document.write(
-    `<!doctype html><html><head><title>${typeTitle(type)} workforce</title><style>body{font-family:Arial,sans-serif;color:#192827;margin:0;padding:18px;background:#fff}.company-header{display:flex;align-items:center;gap:18px;border:2px solid #1e514c;padding:14px 16px;margin-bottom:16px;background:#f6fbfa}.company-logo{width:86px;height:86px;object-fit:contain;border:1px solid #d9eae8;padding:6px;background:#fff}.company-meta{flex:1;text-align:center}.company-meta h1{margin:0;font-size:24px;letter-spacing:0.03em;color:#17312f}.company-meta p{margin:5px 0;font-size:11px;color:#5b6b69;line-height:1.4}.company-meta .title{display:block;margin-top:6px;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#17312f}.summary-line{font-size:12px;color:#71817e;margin:0 0 10px}.table-wrap{overflow:hidden;border:1px solid #dce8e5}table{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th,td{border:1px solid #dce8e5;padding:5px;text-align:left;vertical-align:top;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th{background:#e3f4f0;text-transform:uppercase}</style></head><body><section class="company-header"><img class="company-logo" src="${companyLogoUrl}" onerror="this.style.display='none'"/><div class="company-meta"><h1>${htmlValue(companyName)}</h1><p>${htmlValue(companyAddress)}</p>${contactLine ? `<p>${htmlValue(contactLine)}</p>` : ""}${idLine ? `<p>${htmlValue(idLine)}</p>` : ""}<span class="title">${htmlValue(typeTitle(type).toUpperCase())} WORKFORCE</span></div></section><p class="summary-line">${workers.length} records</p><div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div><script>window.onload=()=>window.print();</script></body></html>`,
+    `<!doctype html><html><head><title>${typeTitle(type)} workforce</title><style>body{font-family:Arial,sans-serif;color:#192827;margin:0;padding:18px;background:#fff}.company-header{display:flex;align-items:center;gap:18px;border:2px solid #1e514c;padding:14px 16px;margin-bottom:16px;background:#f6fbfa}.company-logo{width:86px;height:86px;object-fit:contain;border:1px solid #d9eae8;padding:6px;background:#fff}.company-meta{flex:1;text-align:center}.company-meta h1{margin:0;font-size:24px;letter-spacing:0.03em;color:#17312f}.company-meta p{margin:5px 0;font-size:11px;color:#5b6b69;line-height:1.4}.company-meta .title{display:block;margin-top:6px;font-size:12px;font-weight:700;letter-spacing:0.08em;color:#17312f}.summary-line{font-size:12px;color:#71817e;margin:0 0 10px}.table-wrap{overflow:hidden;border:1px solid #dce8e5}table{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th,td{border:1px solid #dce8e5;padding:5px;text-align:left;vertical-align:top;font-family:Arial,sans-serif;font-size:9px;line-height:1.3;font-weight:400}th{background:#e3f4f0;text-transform:uppercase}.worker-photo{width:42px;height:42px;object-fit:cover;border-radius:50%}</style></head><body><section class="company-header"><img class="company-logo" src="${companyLogoUrl}" onerror="this.style.display='none'"/><div class="company-meta"><h1>${htmlValue(companyName)}</h1><p>${htmlValue(companyAddress)}</p>${contactLine ? `<p>${htmlValue(contactLine)}</p>` : ""}${idLine ? `<p>${htmlValue(idLine)}</p>` : ""}<span class="title">${htmlValue(typeTitle(type).toUpperCase())} WORKFORCE</span></div></section><p class="summary-line">${workers.length} records</p><div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div></body></html>`,
   );
-  printWindow.document.close();
-  printWindow.onload = () => {
+  printWindow.onload = async () => {
+    await Promise.all(
+      [...printWindow.document.images].map((image) =>
+        image.decode().catch(() => undefined),
+      ),
+    );
     printWindow.print();
   };
+  printWindow.document.close();
 }
 
 function printWorkerProfile(worker, data, period) {
@@ -1183,6 +1223,14 @@ export function WorkersPage() {
   const [history, setHistory] = useState();
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [pdfColumnPickerOpen, setPdfColumnPickerOpen] = useState(false);
+  const [selectedPdfColumns, setSelectedPdfColumns] = useState([
+    "companyName",
+    "teamName",
+    "workZone",
+    "active",
+    "totalPayable",
+  ]);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const load = () =>
     request(
@@ -1341,14 +1389,27 @@ export function WorkersPage() {
     }
   };
   const exportPdf = async () => {
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) {
+      setError("Allow pop-ups to generate the workforce PDF.");
+      return;
+    }
     setExporting(true);
     setError("");
     try {
       const companyData = await request(api.get("/company-profile")).catch(
         () => null,
       );
-      printWorkers(filteredWorkers, type, companyData?.profile || null);
+      printWorkers(
+        filteredWorkers,
+        type,
+        companyData?.profile || null,
+        selectedPdfColumns,
+        printWindow,
+      );
+      setPdfColumnPickerOpen(false);
     } catch (err) {
+      printWindow.close();
       setError(errorMessage(err));
     } finally {
       setExporting(false);
@@ -1367,7 +1428,7 @@ export function WorkersPage() {
       <Button
         icon={Printer}
         className={styles["button-pdf"]}
-        onClick={exportPdf}
+        onClick={() => setPdfColumnPickerOpen(true)}
         disabled={exporting}
       >
         PDF
@@ -1864,6 +1925,95 @@ export function WorkersPage() {
             setPermanentlyDeleting(null);
           }}
         />
+      )}
+      {pdfColumnPickerOpen && (
+        <Modal
+          title="PDF mein kya dikhana hai?"
+          onClose={() => !exporting && setPdfColumnPickerOpen(false)}
+          wide
+        >
+          <div className={styles["worker-pdf-picker"]}>
+            <p className={styles["worker-pdf-info"]}>
+              Sr. No. and Labour Name are always included. Choose any other
+              columns for this PDF.
+            </p>
+            <div className={styles["worker-pdf-column-heading"]}>
+              <strong>Columns</strong>
+              <div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedPdfColumns(
+                      pdfExportColumns.map(([, key]) => key),
+                    )
+                  }
+                  disabled={exporting}
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPdfColumns([])}
+                  disabled={exporting}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+            <div className={styles["worker-pdf-required"]}>
+              <label>
+                <input type="checkbox" checked disabled readOnly />
+                Sr. No. (required)
+              </label>
+              <label>
+                <input type="checkbox" checked disabled readOnly />
+                Labour Name (required)
+              </label>
+            </div>
+            <div className={styles["worker-pdf-columns"]}>
+              {pdfExportColumns.map(([label, key]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPdfColumns.includes(key)}
+                    disabled={exporting}
+                    onChange={(event) =>
+                      setSelectedPdfColumns((current) =>
+                        event.target.checked
+                          ? [...current, key]
+                          : current.filter((column) => column !== key),
+                      )
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <p className={styles["worker-pdf-note"]}>
+              PDF will include {selectedPdfColumns.length + 2} columns and{" "}
+              {filteredWorkers.length} matching labour records.
+            </p>
+            <div className={styles["modal-actions"]}>
+              <Button
+                type="button"
+                className={styles["button-ghost"]}
+                onClick={() => setPdfColumnPickerOpen(false)}
+                disabled={exporting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                icon={Printer}
+                className={styles["button-pdf"]}
+                onClick={exportPdf}
+                loading={exporting}
+              >
+                Generate PDF
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </>
   );

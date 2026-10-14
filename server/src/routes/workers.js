@@ -165,6 +165,30 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const filter = { deletedAt: null };
+    const periodDateFilter = {};
+    if (req.query.from) {
+      try {
+        periodDateFilter.$gte = parseLocalDateOnly(req.query.from);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        throw new ApiError(400, "Invalid start date.");
+      }
+    }
+    if (req.query.to) {
+      try {
+        periodDateFilter.$lte = parseLocalDateOnly(req.query.to, true);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        throw new ApiError(400, "Invalid end date.");
+      }
+    }
+    if (
+      periodDateFilter.$gte &&
+      periodDateFilter.$lte &&
+      periodDateFilter.$gte > periodDateFilter.$lte
+    ) {
+      throw new ApiError(400, "Start date cannot be after end date.");
+    }
     const requestedType = req.query.type || "LABOUR";
     filter.type = requestedType;
     if (req.query.active !== undefined)
@@ -191,7 +215,7 @@ router.get(
     }
     const workers = await Worker.find(filter).sort({ active: -1, name: 1 });
     const workerIds = workers.map((worker) => worker._id);
-    const [payableRows, paidRows] = await Promise.all([
+    const [payableRows, paidRows, periodPayableRows, periodPaidRows] = await Promise.all([
       Attendance.aggregate([
         { $match: { worker: { $in: workerIds } } },
         {
@@ -222,6 +246,48 @@ router.get(
           },
         },
       ]),
+      Object.keys(periodDateFilter).length
+        ? Attendance.aggregate([
+            {
+              $match: {
+                worker: { $in: workerIds },
+                date: periodDateFilter,
+              },
+            },
+            {
+              $group: {
+                _id: "$worker",
+                totalPayable: { $sum: "$payableAmount" },
+              },
+            },
+          ])
+        : Promise.resolve([]),
+      Object.keys(periodDateFilter).length
+        ? Payment.aggregate([
+            {
+              $match: {
+                worker: { $in: workerIds },
+                deletedAt: null,
+                paidOn: periodDateFilter,
+              },
+            },
+            {
+              $group: {
+                _id: "$worker",
+                totalPaid: {
+                  $sum: {
+                    $cond: [{ $eq: ["$flow", "OUTFLOW"] }, "$amount", 0],
+                  },
+                },
+                totalReturned: {
+                  $sum: {
+                    $cond: [{ $eq: ["$flow", "INFLOW"] }, "$amount", 0],
+                  },
+                },
+              },
+            },
+          ])
+        : Promise.resolve([]),
     ]);
     const payableByWorker = new Map(
       payableRows.map((row) => [
@@ -239,6 +305,21 @@ router.get(
         },
       ]),
     );
+    const periodPayableByWorker = new Map(
+      periodPayableRows.map((row) => [
+        String(row._id),
+        Number(row.totalPayable || 0),
+      ]),
+    );
+    const periodPaidByWorker = new Map(
+      periodPaidRows.map((row) => [
+        String(row._id),
+        {
+          totalPaid: Number(row.totalPaid || 0),
+          totalReturned: Number(row.totalReturned || 0),
+        },
+      ]),
+    );
     const today = new Date();
     const rateContext = await loadCompanyWorkerRateHistory(workers, today);
     res.json({
@@ -248,6 +329,11 @@ router.get(
         const totalPaid = paymentTotals.totalPaid || 0;
         const totalReturned = paymentTotals.totalReturned || 0;
         const netPaid = totalPaid - totalReturned;
+        const periodPayable = periodPayableByWorker.get(String(worker._id)) || 0;
+        const periodPayments = periodPaidByWorker.get(String(worker._id)) || {};
+        const periodNetPaid =
+          Number(periodPayments.totalPaid || 0) -
+          Number(periodPayments.totalReturned || 0);
         const workerData = worker.toObject();
         if (workerData.aadhaarFrontPublicId)
           workerData.aadhaarFrontPath = authenticatedImageUrl(
@@ -269,6 +355,16 @@ router.get(
           lastPaymentOn: paymentTotals.lastPaymentOn || null,
           totalDue: Math.max(0, totalPayable - netPaid),
           overpaid: Math.max(0, netPaid - totalPayable),
+          ...(Object.keys(periodDateFilter).length
+            ? {
+                periodPayable,
+                periodPaid: Number(periodPayments.totalPaid || 0),
+                periodReturned: Number(periodPayments.totalReturned || 0),
+                periodNetPaid,
+                periodDue: Math.max(0, periodPayable - periodNetPaid),
+                periodOverpaid: Math.max(0, periodNetPaid - periodPayable),
+              }
+            : {}),
         };
       }),
     });

@@ -25,6 +25,12 @@ import {
 } from "../components/ui/index.jsx";
 import styles from "../styles/design.module.css";
 import { buildDirtyAttendanceEntries } from "../utils/attendanceChanges.js";
+import { fetchAllPages } from "../utils/fetchAllPages.js";
+import { subscribeToPaymentChanges } from "../utils/paymentEvents.js";
+import {
+  calculateAttendanceBalance,
+  sumNetPaymentsForWorkers,
+} from "../utils/attendancePaymentSummary.js";
 
 const statusMeta = {
   NOT_MARKED: { tone: "neutral", label: "Not marked", Icon: CalendarDays },
@@ -47,6 +53,10 @@ function MonthlyAttendance() {
     attendance: [],
     canEdit: false,
   });
+  const [periodPayments, setPeriodPayments] = useState([]);
+  const [paymentsRefresh, setPaymentsRefresh] = useState(0);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsError, setPaymentsError] = useState("");
   const [cells, setCells] = useState({});
   const [drafts, setDrafts] = useState({});
   const [workerSearch, setWorkerSearch] = useState("");
@@ -154,6 +164,67 @@ function MonthlyAttendance() {
   useEffect(() => {
     load();
   }, [month, businessType]);
+
+  useEffect(() => {
+    if (!periodStart || !periodEnd || periodStart > periodEnd) {
+      setPeriodPayments([]);
+      setPaymentsLoading(false);
+      setPaymentsError("Choose a valid attendance date range.");
+      return undefined;
+    }
+
+    let active = true;
+    setPaymentsLoading(true);
+    setPaymentsError("");
+    fetchAllPages(async (skip, limit) => {
+      const result = await request(
+        api.get("/payments", {
+          params: {
+            type: businessType,
+            from: periodStart,
+            to: periodEnd,
+            limit,
+            skip,
+          },
+        }),
+      );
+      return { items: result.payments, total: result.total };
+    })
+      .then((payments) => {
+        if (active) setPeriodPayments(payments);
+      })
+      .catch((err) => {
+        if (active) {
+          setPeriodPayments([]);
+          setPaymentsError(errorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (active) setPaymentsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [periodStart, periodEnd, businessType, paymentsRefresh]);
+
+  useEffect(
+    () =>
+      subscribeToPaymentChanges(() => {
+        setPaymentsRefresh((current) => current + 1);
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        setPaymentsRefresh((current) => current + 1);
+      }
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    return () => window.removeEventListener("focus", refreshWhenVisible);
+  }, []);
 
   useEffect(() => {
     setWorkerPage(1);
@@ -329,6 +400,27 @@ function MonthlyAttendance() {
         )
     );
   };
+  const selectedPeriodPayable = filteredWorkers.reduce((total, worker) => {
+    for (let day = 1; day <= data.days; day += 1) {
+      const dateKey = `${month}-${String(day).padStart(2, "0")}`;
+      if (dateKey < periodStart || dateKey > periodEnd) continue;
+      const cell = cellFor(worker._id, day);
+      total += Number(
+        cell.payableAmount ??
+          payableFor(worker, cell, dateKey),
+      );
+    }
+    return total;
+  }, 0);
+  const filteredWorkerIds = new Set(filteredWorkers.map((worker) => worker._id));
+  const selectedPeriodPaid = sumNetPaymentsForWorkers(
+    periodPayments,
+    filteredWorkerIds,
+  );
+  const selectedPeriodBalance = calculateAttendanceBalance(
+    selectedPeriodPayable,
+    selectedPeriodPaid,
+  );
   const updateCell = (workerId, day, value) => {
     if (data.locked || !data.canEdit) return;
     const dateKey = `${month}-${String(day).padStart(2, "0")}`;
@@ -727,31 +819,46 @@ function MonthlyAttendance() {
             <div className={`${styles["metric-top"]}`}>
               <span>Total payable</span>
             </div>
+            <strong>{money(selectedPeriodPayable)}</strong>
+          </div>
+          <div className={`${styles["metric"]} ${styles["metric-teal"]}`}>
+            <div className={`${styles["metric-top"]}`}>
+              <span>Already paid</span>
+            </div>
             <strong>
-              {money(
-                data.workers.reduce((total, worker) => {
-                  if (!workerMatches(worker)) return total;
-                  for (let day = 1; day <= data.days; day += 1) {
-                    const dateKey = `${month}-${String(day).padStart(2, "0")}`;
-                    if (dateKey >= periodStart && dateKey <= periodEnd) {
-                      const cell = cellFor(worker._id, day);
-                      total += Number(
-                        cell.payableAmount ??
-                          payableFor(
-                            worker,
-                            cell,
-                            `${month}-${String(day).padStart(2, "0")}`,
-                          ),
-                      );
-                    }
-                  }
-                  return total;
-                }, 0),
-              )}
+              {paymentsLoading
+                ? "Loading…"
+                : paymentsError
+                  ? "Unavailable"
+                  : money(selectedPeriodPaid)}
             </strong>
+            <small>
+              {paymentsError
+                ? "Unable to load payments for this period."
+                : `Net payments from ${periodStart} to ${periodEnd} for filtered labour`}
+            </small>
+          </div>
+          <div className={`${styles["metric"]} ${styles["metric-coral"]}`}>
+            <div className={`${styles["metric-top"]}`}>
+              <span>Balance</span>
+            </div>
+            <strong>
+              {paymentsLoading
+                ? "Calculating…"
+                : paymentsError
+                  ? "Unavailable"
+                  : money(selectedPeriodBalance)}
+            </strong>
+            <small>
+              {paymentsError
+                ? "Balance = total payable − already paid"
+                : paymentsLoading
+                  ? "Balance = total payable − already paid"
+                  : `${money(selectedPeriodPayable)} − ${money(selectedPeriodPaid)} = ${money(selectedPeriodBalance)}`}
+            </small>
           </div>
         </div>
-        <ErrorNote error={error} />
+        <ErrorNote error={error || paymentsError} />
         {saved && <Status tone="teal">Month saved</Status>}
         {loading ? (
           <Empty title="Loading month…" />

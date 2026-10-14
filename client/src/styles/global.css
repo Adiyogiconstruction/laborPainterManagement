@@ -73,6 +73,11 @@ select:focus {
   display: none;
 }
 
+.reports-pdf-serial,
+.reports-pdf-rank-serial {
+  display: none;
+}
+
 @media print {
   @page {
     size: auto;
@@ -86,6 +91,17 @@ select:focus {
     border-bottom: 2px solid #23443c;
     color: #203b35;
     font-family: Arial, sans-serif;
+  }
+
+  .reports-pdf-serial {
+    display: table-cell !important;
+  }
+
+  .reports-pdf-rank-serial {
+    display: inline-block !important;
+    min-width: 18px;
+    color: #52645f;
+    font-weight: 700;
   }
 
   .report-print-heading > p {
@@ -121,6 +137,11 @@ select:focus {
     display: none !important;
   }
 
+  .reports-print-root .attendance-report-panel {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
   .attendance-print-root > :not(.attendance-report-panel):not(.report-print-heading) {
     display: none !important;
   }
@@ -132,6 +153,8 @@ select:focus {
   .attendance-print-root .attendance-report-panel {
     display: block !important;
     margin: 0;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
   }
 
   .attendance-print-root .attendance-print-action {

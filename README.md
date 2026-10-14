@@ -31,7 +31,7 @@ The amount can also be overridden for job, square-foot or lump-sum work. Payment
 
 ## Run locally
 
-1. Copy `server/.env.example` to the server environment and set `PORT`, `MONGODB_URI`, a long random `JWT_SECRET`, the deployed frontend URL in `CLIENT_ORIGIN`, all three Cloudinary credentials, and SMTP settings. SMTP must be configured to deliver owner password recovery links. Never commit either `.env` file.
+1. Configure the server environment with `PORT`, `MONGODB_URI`, a long random `JWT_SECRET`, the deployed frontend URL in `CLIENT_ORIGIN`, all three Cloudinary credentials, SMTP settings, and a private `OWNER_SETUP_KEY` containing at least 32 random characters. Generate one with `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`. Keep the key out of source control and share it only with the real workspace owner over a private channel. SMTP must be configured to deliver owner password recovery links. Never commit either `.env` file.
 2. Copy `client/.env.example` to the frontend build environment and set `VITE_API_URL` to the deployed backend URL ending in `/api`.
 3. Install packages:
 
@@ -45,7 +45,7 @@ The amount can also be overridden for job, square-foot or lump-sum work. Payment
    npm run dev
    ```
 
-5. Open `http://localhost:5173`. The first screen creates the initial Owner account; subsequent users sign in normally.
+5. Open `http://localhost:5173` and provide the private owner setup key to create the initial Owner account. The setup endpoint is unavailable without the configured key and closes permanently as soon as the first account is created; subsequent users sign in normally. After setup, remove `OWNER_SETUP_KEY` from the server environment and restart the API.
 
 ### Owner password recovery
 

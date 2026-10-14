@@ -13,7 +13,7 @@ const formatDuration = (milliseconds) => {
   const totalMinutes = Math.floor(milliseconds / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
 };
 
 export function createAdminUsagePdf({ profile, filters, rows }) {
@@ -36,8 +36,12 @@ export function createAdminUsagePdf({ profile, filters, rows }) {
       .filter(Boolean)
       .join(" · "),
   ].filter(Boolean);
-  const totalMilliseconds = rows.reduce(
-    (total, row) => total + row.totalMilliseconds,
+  const totalActiveMilliseconds = rows.reduce(
+    (total, row) => total + Number(row.activeMilliseconds || 0),
+    0,
+  );
+  const totalInactiveMilliseconds = rows.reduce(
+    (total, row) => total + Number(row.inactiveMilliseconds || 0),
     0,
   );
 
@@ -65,7 +69,7 @@ export function createAdminUsagePdf({ profile, filters, rows }) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
   doc.setTextColor(25, 39, 38);
-  doc.text("ADMIN USAGE ACTIVITY REPORT", margin, headerY);
+  doc.text("ADMIN ACCESS ACTIVITY REPORT", margin, headerY);
 
   headerY += 7;
   doc.setFont("helvetica", "bold");
@@ -77,7 +81,7 @@ export function createAdminUsagePdf({ profile, filters, rows }) {
   doc.setTextColor(75, 89, 87);
   const appliedFilters = [
     `Date range: ${formatDate(filters.from)} to ${formatDate(filters.to)}`,
-    `Administrator: ${filters.adminName || "All administrators"}`,
+    `User: ${filters.adminName || "All users"}`,
   ];
   for (const filter of appliedFilters) {
     const wrapped = doc.splitTextToSize(filter, contentWidth);
@@ -86,19 +90,42 @@ export function createAdminUsagePdf({ profile, filters, rows }) {
   }
   headerY += 3;
 
-  const body = rows.map((row) => [
+  const body = rows.map((row, index) => [
+    String(index + 1),
     formatDate(row.date),
     row.userName,
-    formatDuration(row.totalMilliseconds),
+    formatDuration(row.activeMilliseconds),
+    formatDuration(row.inactiveMilliseconds),
   ]);
   body.push([
-    { content: "Total logged-in time", colSpan: 2, styles: { fontStyle: "bold" } },
-    { content: formatDuration(totalMilliseconds), styles: { fontStyle: "bold" } },
+    "",
+    {
+      content: "Selected period total",
+      colSpan: 2,
+      styles: { fontStyle: "bold" },
+    },
+    {
+      content: formatDuration(totalActiveMilliseconds),
+      styles: { fontStyle: "bold", textColor: [25, 114, 67] },
+    },
+    {
+      content: formatDuration(totalInactiveMilliseconds),
+      styles: { fontStyle: "bold" },
+    },
   ]);
 
   autoTable(doc, {
-    head: [["Date", "Administrator", "Logged-in time"]],
-    body: body.length > 1 ? body : [["—", "No activity recorded.", "—"]],
+    head: [[
+      "Sr. No.",
+      "Date",
+      "User name",
+      "Active Time",
+      "Non-active Time",
+    ]],
+    body:
+      rows.length > 0
+        ? body
+        : [["—", "—", "No activity recorded.", "—", "—"]],
     startY: headerY,
     margin: { left: margin, right: margin, top: 14, bottom: 14 },
     showHead: "everyPage",
@@ -119,12 +146,14 @@ export function createAdminUsagePdf({ profile, filters, rows }) {
       fontStyle: "bold",
     },
     columnStyles: {
-      0: { cellWidth: 38 },
-      1: { cellWidth: "auto" },
-      2: { cellWidth: 42, halign: "right" },
+      0: { cellWidth: 14, halign: "center" },
+      1: { cellWidth: 34 },
+      2: { cellWidth: "auto" },
+      3: { cellWidth: 37, halign: "right", textColor: [25, 114, 67] },
+      4: { cellWidth: 37, halign: "right" },
     },
     didParseCell(data) {
-      if (data.row.index === body.length - 1 && data.section === "body") {
+      if (rows.length > 0 && data.row.index === rows.length && data.section === "body") {
         data.cell.styles.fillColor = [246, 248, 247];
       }
     },

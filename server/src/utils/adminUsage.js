@@ -56,6 +56,26 @@ export function currentUsageDate(now = new Date()) {
     .slice(0, 10);
 }
 
+export function splitUsageIntervalByIndiaDate(startValue, endValue) {
+  const start = new Date(startValue).getTime();
+  const end = new Date(endValue).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return [];
+  }
+
+  const intervals = [];
+  for (let cursor = start; cursor < end;) {
+    const date = currentUsageDate(new Date(cursor));
+    const nextDay = new Date(`${date}T00:00:00.000Z`).getTime() +
+      DAY_MS -
+      INDIA_OFFSET_MS;
+    const intervalEnd = Math.min(end, nextDay);
+    intervals.push({ date, milliseconds: intervalEnd - cursor });
+    cursor = intervalEnd;
+  }
+  return intervals;
+}
+
 export function getUsagePeriodRange(period, dateValue) {
   if (!["day", "week", "month", "year"].includes(period)) {
     throw new Error("Period must be day, week, month or year.");

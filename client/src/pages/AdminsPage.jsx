@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   ArrowUpRight,
@@ -102,6 +103,7 @@ function AdminForm({ onClose, onSaved }) {
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
           >
+            <option value="OWNER">Owner — full access</option>
             <option value="ADMIN">Admin — manage daily records</option>
             <option value="VIEWER">Viewer — reports only</option>
           </select>
@@ -386,7 +388,7 @@ export function AdminsPage() {
         loadUsage(appliedUsageFilters.from, appliedUsageFilters.to);
       }
     };
-    const intervalId = window.setInterval(refreshUsage, 10 * 60 * 1000);
+    const intervalId = window.setInterval(refreshUsage, 60 * 1000);
     document.addEventListener("visibilitychange", refreshUsage);
     return () => {
       window.clearInterval(intervalId);
@@ -406,23 +408,29 @@ export function AdminsPage() {
     (currentUsagePage - 1) * usagePageSize,
     currentUsagePage * usagePageSize,
   );
-  const totalUsageMilliseconds = visibleUsageRows.reduce(
-    (total, row) => total + row.totalMilliseconds,
+  const totalActiveMilliseconds = visibleUsageRows.reduce(
+    (total, row) => total + Number(row.activeMilliseconds || 0),
+    0,
+  );
+  const totalInactiveMilliseconds = visibleUsageRows.reduce(
+    (total, row) => total + Number(row.inactiveMilliseconds || 0),
     0,
   );
   const formatDuration = (milliseconds) => {
     const totalMinutes = Math.floor(milliseconds / 60000);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+    return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
   };
   const periodDate = (value) =>
-    new Intl.DateTimeFormat("en-IN", {
+    new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
-      month: "short",
+      month: "2-digit",
       year: "numeric",
       timeZone: "UTC",
-    }).format(new Date(`${value}T00:00:00.000Z`));
+    })
+      .format(new Date(`${value}T00:00:00.000Z`))
+      .replaceAll("/", "-");
   const downloadUsagePdf = async () => {
     setError("");
     try {
@@ -535,7 +543,204 @@ export function AdminsPage() {
       <PageHeader
         title="Admin access"
         detail="User activity and time report"
+        action={
+          <Button
+            type="button"
+            className={`${styles["button-secondary"]}`}
+            onClick={downloadUsagePdf}
+            disabled={!visibleUsageRows.length || usageLoading}
+          >
+            <FileDown size={15} /> Download report
+          </Button>
+        }
       />
+      <Panel
+        title="Date-wise filters"
+        className={styles["admin-usage-filter-panel"]}
+      >
+        <div className={`${styles["admin-usage-filters"]}`}>
+          <Field label="From date">
+            <input
+              required
+              type="date"
+              value={usageFrom}
+              max={usageTo || undefined}
+              onChange={(event) => setUsageFrom(event.target.value)}
+            />
+          </Field>
+          <Field label="To date">
+            <input
+              required
+              type="date"
+              value={usageTo}
+              min={usageFrom || undefined}
+              onChange={(event) => setUsageTo(event.target.value)}
+            />
+          </Field>
+          <Field label="User">
+            <select
+              value={usageAdmin}
+              onChange={(event) => setUsageAdmin(event.target.value)}
+            >
+              <option value="">All users</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className={styles["admin-usage-filter-actions"]}>
+            <Button
+              type="button"
+              className={`${styles["button-primary"]}`}
+              onClick={() => {
+                setUsagePage(1);
+                setAppliedUsageFilters({
+                  from: usageFrom,
+                  to: usageTo,
+                  admin: usageAdmin,
+                });
+                loadUsage(usageFrom, usageTo);
+              }}
+              disabled={!usageFrom || !usageTo || usageFrom > usageTo}
+            >
+              Apply Filter
+            </Button>
+            <Button
+              type="button"
+              className={`${styles["button-ghost"]}`}
+              onClick={() => {
+                const today = currentUsageDate();
+                setUsageFrom(today);
+                setUsageTo(today);
+                setUsageAdmin("");
+                setUsagePage(1);
+                setAppliedUsageFilters({ from: today, to: today, admin: "" });
+                loadUsage(today, today);
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+        <ErrorNote error={error} />
+      </Panel>
+      <Panel
+        title="Date-wise user activity"
+        className={styles["admin-usage-panel"]}
+        action={
+          <Button
+            type="button"
+            className={`${styles["button-ghost"]}`}
+            onClick={() => loadUsage()}
+            loading={usageLoading}
+            aria-label="Refresh usage"
+            title="Refresh usage"
+          >
+            <RefreshCcw size={15} />
+          </Button>
+        }
+      >
+        <div className={`${styles["table-wrap"]}`}>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>User name</th>
+                <th>Active Time</th>
+                <th>Non-active Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleUsageRows.length ? (
+                paginatedUsageRows.map((row) => (
+                  <tr key={`${row.userId}-${row.date}`}>
+                    <td>{periodDate(row.date)}</td>
+                    <td>
+                      <strong>{row.userName}</strong>
+                    </td>
+                    <td className={styles["admin-usage-active-time"]}>
+                      {formatDuration(row.activeMilliseconds)}
+                    </td>
+                    <td>{formatDuration(row.inactiveMilliseconds)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4">
+                    {usageLoading
+                      ? "Loading usage…"
+                      : "No activity recorded for these dates."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            {visibleUsageRows.length > 0 && (
+              <tfoot>
+                <tr>
+                  <th colSpan="2">Selected period total</th>
+                  <th className={styles["admin-usage-active-time"]}>
+                    {formatDuration(totalActiveMilliseconds)}
+                  </th>
+                  <th>{formatDuration(totalInactiveMilliseconds)}</th>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+        {visibleUsageRows.length > 0 && (
+          <div className={styles["workforce-pagination"]}>
+            <label>
+              Show
+              <select
+                value={usagePageSize}
+                onChange={(event) => {
+                  setUsagePageSize(Number(event.target.value));
+                  setUsagePage(1);
+                }}
+                aria-label="Usage rows per page"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+              rows
+            </label>
+            <span>
+              Showing {(currentUsagePage - 1) * usagePageSize + 1}–
+              {Math.min(currentUsagePage * usagePageSize, visibleUsageRows.length)}{" "}
+              of {visibleUsageRows.length}
+            </span>
+            <div>
+              <Button
+                type="button"
+                className={`${styles["button-secondary"]}`}
+                onClick={() => setUsagePage(currentUsagePage - 1)}
+                disabled={currentUsagePage <= 1}
+              >
+                Previous
+              </Button>
+              <Button
+                type="button"
+                className={`${styles["button-secondary"]}`}
+                onClick={() => setUsagePage(currentUsagePage + 1)}
+                disabled={currentUsagePage >= usagePageCount}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+        <div className={styles["admin-usage-note"]}>
+          <AlertTriangle size={16} />
+          <p>
+            5 minute tak koi activity na ho to idle maana jayega. Logout ke
+            baad time count nahi hoga. Is update se pehle ka logged-in time
+            active/non-active mein reliably split nahi ho sakta.
+          </p>
+        </div>
+      </Panel>
       <Panel
         title="Workspace team"
         detail="Owners can create, disable, or permanently remove non-owner accounts."
@@ -616,184 +821,6 @@ export function AdminsPage() {
             </tbody>
           </table>
         </div>
-      </Panel>
-      <Panel
-        title="Date-wise user activity"
-        className={styles["admin-usage-panel"]}
-        detail="Logged-in time includes idle time while the app remains open. Logout stops it immediately; if the browser closes, time ends at the last 10-minute activity check."
-        action={
-          <div className={styles["admin-usage-actions"]}>
-            <Button
-              type="button"
-              className={`${styles["button-ghost"]}`}
-              onClick={() => loadUsage()}
-              loading={usageLoading}
-              aria-label="Refresh usage"
-              title="Refresh usage"
-            >
-              <RefreshCcw size={15} />
-            </Button>
-          </div>
-        }
-      >
-        <div className={`${styles["admin-usage-filters"]}`}>
-          <Field label="From date">
-            <input
-              required
-              type="date"
-              value={usageFrom}
-              max={usageTo || undefined}
-              onChange={(event) => setUsageFrom(event.target.value)}
-            />
-          </Field>
-          <Field label="To date">
-            <input
-              required
-              type="date"
-              value={usageTo}
-              min={usageFrom || undefined}
-              onChange={(event) => setUsageTo(event.target.value)}
-            />
-          </Field>
-          <Field label="Administrator">
-            <select
-              value={usageAdmin}
-              onChange={(event) => setUsageAdmin(event.target.value)}
-            >
-              <option value="">All administrators</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <div className={styles["admin-usage-filter-actions"]}>
-            <Button
-              type="button"
-              className={`${styles["button-primary"]}`}
-              onClick={() => {
-                setUsagePage(1);
-                setAppliedUsageFilters({
-                  from: usageFrom,
-                  to: usageTo,
-                  admin: usageAdmin,
-                });
-                loadUsage(usageFrom, usageTo);
-              }}
-              disabled={!usageFrom || !usageTo || usageFrom > usageTo}
-            >
-              Apply
-            </Button>
-            <Button
-              type="button"
-              className={`${styles["button-ghost"]}`}
-              onClick={() => {
-                const today = currentUsageDate();
-                setUsageFrom(today);
-                setUsageTo(today);
-                setUsageAdmin("");
-                setUsagePage(1);
-                setAppliedUsageFilters({ from: today, to: today, admin: "" });
-                loadUsage(today, today);
-              }}
-            >
-              Reset
-            </Button>
-            <Button
-              type="button"
-              className={`${styles["button-pdf"]}`}
-              onClick={downloadUsagePdf}
-              disabled={!visibleUsageRows.length}
-            >
-              <FileDown size={15} /> PDF
-            </Button>
-          </div>
-        </div>
-        <ErrorNote error={error} />
-        <div className={`${styles["table-wrap"]}`}>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Administrator</th>
-                <th>Logged-in time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleUsageRows.length ? (
-                paginatedUsageRows.map((row) => (
-                  <tr key={`${row.userId}-${row.date}`}>
-                    <td>{periodDate(row.date)}</td>
-                    <td>
-                      <strong>{row.userName}</strong>
-                    </td>
-                    <td>{formatDuration(row.totalMilliseconds)}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="3">
-                    {usageLoading
-                      ? "Loading usage…"
-                      : "No website usage recorded for these dates."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {visibleUsageRows.length > 0 && (
-              <tfoot>
-                <tr>
-                  <th colSpan="2">Total logged-in time</th>
-                  <th>{formatDuration(totalUsageMilliseconds)}</th>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-        {visibleUsageRows.length > 0 && (
-          <div className={styles["workforce-pagination"]}>
-            <label>
-              Show
-              <select
-                value={usagePageSize}
-                onChange={(event) => {
-                  setUsagePageSize(Number(event.target.value));
-                  setUsagePage(1);
-                }}
-                aria-label="Usage rows per page"
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
-              rows
-            </label>
-            <span>
-              Showing {(currentUsagePage - 1) * usagePageSize + 1}–
-              {Math.min(currentUsagePage * usagePageSize, visibleUsageRows.length)}{" "}
-              of {visibleUsageRows.length}
-            </span>
-            <div>
-              <Button
-                type="button"
-                className={`${styles["button-secondary"]}`}
-                onClick={() => setUsagePage(currentUsagePage - 1)}
-                disabled={currentUsagePage <= 1}
-              >
-                Previous
-              </Button>
-              <Button
-                type="button"
-                className={`${styles["button-secondary"]}`}
-                onClick={() => setUsagePage(currentUsagePage + 1)}
-                disabled={currentUsagePage >= usagePageCount}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
       </Panel>
       <Panel
         title="Access activity"

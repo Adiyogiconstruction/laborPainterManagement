@@ -9,7 +9,13 @@ import companyLogo from "../assets/image.png";
 export function LoginPage({ onAuthenticated }) {
   const navigate = useNavigate();
   const [needsSetup, setNeedsSetup] = useState(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [setupAvailable, setSetupAvailable] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    setupKey: "",
+  });
   const [recoveryMode, setRecoveryMode] = useState("login");
   const [resetToken, setResetToken] = useState(
     () =>
@@ -31,7 +37,10 @@ export function LoginPage({ onAuthenticated }) {
   };
   useEffect(() => {
     request(api.get("/auth/setup-status"))
-      .then(({ needsSetup: value }) => setNeedsSetup(value))
+      .then(({ needsSetup: value, setupAvailable: available }) => {
+        setNeedsSetup(value);
+        setSetupAvailable(Boolean(available));
+      })
       .catch((err) => {
         setNeedsSetup(false);
         setError(err.message);
@@ -253,22 +262,44 @@ export function LoginPage({ onAuthenticated }) {
               Back to sign in
             </Button>
           </div>
+        ) : needsSetup && !setupAvailable ? (
+          <p className={`${styles["form-error"]}`}>
+            Initial owner setup is locked until the system operator configures
+            the private owner setup key on the server. Contact the system
+            operator; do not share the key publicly.
+          </p>
         ) : (
         <form
           onSubmit={recoveryMode === "request" ? requestPasswordRecovery : submit}
           className={`${styles["form-stack"]}`}
         >
           {needsSetup && recoveryMode === "login" && (
-            <label className={`${styles["field"]}`}>
-              <span>Your name</span>
-              <input
-                required
-                autoFocus
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Aditya Kumar"
-              />
-            </label>
+            <>
+              <label className={`${styles["field"]}`}>
+                <span>Your name</span>
+                <input
+                  required
+                  autoFocus
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Aditya Kumar"
+                />
+              </label>
+              <label className={`${styles["field"]}`}>
+                <span>Private owner setup key</span>
+                <input
+                  required
+                  minLength="32"
+                  type="password"
+                  autoComplete="off"
+                  value={form.setupKey}
+                  onChange={(e) =>
+                    setForm({ ...form, setupKey: e.target.value })
+                  }
+                  placeholder="Provided privately by the system operator"
+                />
+              </label>
+            </>
           )}
           <label className={`${styles["field"]}`}>
             <span>Email address</span>
@@ -340,7 +371,7 @@ export function LoginPage({ onAuthenticated }) {
             type="submit"
             className={`${styles["button-primary"]} ${styles["button-block"]}`}
             loading={loading}
-            disabled={loading || !captcha}
+            disabled={loading || !captcha || (needsSetup && !setupAvailable)}
           >
             {recoveryMode === "request"
               ? "Send recovery link"

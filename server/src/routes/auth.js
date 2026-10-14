@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import AdminActivity from "../models/AdminActivity.js";
 import AdminSession from "../models/AdminSession.js";
+import AdminUsageDaily from "../models/AdminUsageDaily.js";
 import { allowRoles, requireAuth, signToken } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { safeUser } from "../utils/serializers.js";
@@ -16,6 +17,7 @@ import {
   currentUsageDate,
   getUsageDateRange,
   getUsagePeriodRange,
+  splitUsageIntervalByIndiaDate,
   summarizeAdminUsage,
   summarizeAdminUsageByDay,
 } from "../utils/adminUsage.js";
@@ -32,6 +34,10 @@ import {
   hashOwnerPasswordResetToken,
   OWNER_PASSWORD_RESET_TTL_MS,
 } from "../utils/ownerPasswordReset.js";
+import {
+  isOwnerSetupEnabled,
+  matchesOwnerSetupKey,
+} from "../utils/ownerSetup.js";
 import {
   assertOwnerPasswordResetEmailConfigured,
   sendOwnerPasswordResetEmail,
@@ -86,7 +92,11 @@ router.get(
 router.get(
   "/setup-status",
   asyncHandler(async (_req, res) => {
-    res.json({ needsSetup: (await User.countDocuments()) === 0 });
+    const needsSetup = (await User.countDocuments()) === 0;
+    res.json({
+      needsSetup,
+      setupAvailable: needsSetup && isOwnerSetupEnabled(),
+    });
   }),
 );
 
@@ -94,6 +104,12 @@ router.post(
   "/setup",
   authRateLimit,
   asyncHandler(async (req, res) => {
+    if (!isOwnerSetupEnabled()) {
+      throw new ApiError(
+        503,
+        "Initial owner setup is disabled. Ask the system operator to configure the owner setup key.",
+      );
+    }
     if (
       !verifyCaptchaChallenge(
         req.body.captchaToken,
@@ -102,6 +118,9 @@ router.post(
       )
     ) {
       throw new ApiError(400, "CAPTCHA is incorrect or expired. Try again.");
+    }
+    if (!matchesOwnerSetupKey(req.body.setupKey)) {
+      throw new ApiError(403, "Owner setup key is invalid.");
     }
     if (await User.countDocuments())
       throw new ApiError(409, "The workspace has already been set up.");
@@ -328,17 +347,61 @@ router.post(
   "/session/heartbeat",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const result = await AdminSession.updateOne(
+    const hasActivitySignal = Object.hasOwn(req.body || {}, "active");
+    if (hasActivitySignal && typeof req.body.active !== "boolean") {
+      throw new ApiError(400, "Session activity signal must be a boolean.");
+    }
+    const now = new Date();
+    const update = { $set: { lastSeenAt: now } };
+    if (hasActivitySignal) update.$set.lastUsagePulseAt = now;
+    const session = await AdminSession.findOneAndUpdate(
       {
         _id: req.sessionId,
         user: req.user._id,
         endedAt: null,
-        expiresAt: { $gt: new Date() },
+        expiresAt: { $gt: now },
       },
-      { $set: { lastSeenAt: new Date() } },
-    );
-    if (!result.matchedCount) {
+      update,
+      { new: false },
+    ).select("lastUsagePulseAt");
+    if (!session) {
       throw new ApiError(401, "Your session has expired. Please sign in again.");
+    }
+    if (hasActivitySignal && session.lastUsagePulseAt) {
+      const pulseStart = new Date(session.lastUsagePulseAt).getTime();
+      const elapsed = Math.min(
+        60_000,
+        Math.max(0, now.getTime() - pulseStart),
+      );
+      if (elapsed > 0) {
+        const intervals = splitUsageIntervalByIndiaDate(
+          now.getTime() - elapsed,
+          now,
+        );
+        await Promise.all(
+          intervals.map(async ({ date, milliseconds }) => {
+            const filter = { session: req.sessionId, date };
+            const updateUsage = {
+              $setOnInsert: { user: req.user._id },
+              $inc: {
+                [req.body.active
+                  ? "activeMilliseconds"
+                  : "inactiveMilliseconds"]: milliseconds,
+              },
+            };
+            try {
+              await AdminUsageDaily.updateOne(filter, updateUsage, {
+                upsert: true,
+              });
+            } catch (error) {
+              if (error.code !== 11000) throw error;
+              await AdminUsageDaily.updateOne(filter, {
+                $inc: updateUsage.$inc,
+              });
+            }
+          }),
+        );
+      }
     }
     res.status(204).end();
   }),
@@ -393,36 +456,43 @@ router.get(
       } catch (error) {
         throw new ApiError(400, error.message);
       }
-      const now = new Date();
-      const periodEnd = new Date(Math.min(range.end.getTime(), now.getTime()));
-      const [users, sessions] = await Promise.all([
+      const [users, usage] = await Promise.all([
         User.find().sort({ createdAt: -1 }),
-        periodEnd > range.start
-          ? AdminSession.find({
-              startedAt: { $lt: periodEnd },
-              expiresAt: { $gt: range.start },
-              $or: [{ endedAt: null }, { endedAt: { $gt: range.start } }],
-            }).select("user startedAt lastSeenAt expiresAt endedAt")
-          : [],
+        AdminUsageDaily.aggregate([
+          {
+            $match: {
+              date: {
+                $gte: String(req.query.from),
+                $lte: String(req.query.to),
+              },
+            },
+          },
+          {
+            $group: {
+              _id: { user: "$user", date: "$date" },
+              activeMilliseconds: { $sum: "$activeMilliseconds" },
+              inactiveMilliseconds: { $sum: "$inactiveMilliseconds" },
+            },
+          },
+          { $sort: { "_id.date": 1 } },
+        ]),
       ]);
-      const sessionsByUser = new Map();
-      for (const session of sessions) {
-        const key = String(session.user);
-        if (!sessionsByUser.has(key)) sessionsByUser.set(key, []);
-        sessionsByUser.get(key).push(session);
-      }
-      const rows = users.flatMap((user) =>
-        summarizeAdminUsageByDay(
-          sessionsByUser.get(String(user._id)) || [],
-          String(req.query.from),
-          String(req.query.to),
-          now,
-        ).map((summary) => ({
-          userId: user.id,
-          userName: user.name,
-          ...summary,
-        })),
-      ).sort(
+      const usersById = new Map(users.map((user) => [String(user._id), user]));
+      const rows = usage.flatMap((summary) => {
+        const user = usersById.get(String(summary._id.user));
+        if (!user) return [];
+        return [
+          {
+            userId: user.id,
+            userName: user.name,
+            date: summary._id.date,
+            activeMilliseconds: summary.activeMilliseconds,
+            inactiveMilliseconds: summary.inactiveMilliseconds,
+            totalMilliseconds:
+              summary.activeMilliseconds + summary.inactiveMilliseconds,
+          },
+        ];
+      }).sort(
         (left, right) =>
           left.date.localeCompare(right.date) ||
           left.userName.localeCompare(right.userName),
@@ -496,7 +566,7 @@ router.post(
       throw new ApiError(400, "Name, email and password are required.");
     if (String(password).length < 8 || String(password).length > 128)
       throw new ApiError(400, "Password must be between 8 and 128 characters.");
-    if (!["ADMIN", "VIEWER"].includes(role))
+    if (!["OWNER", "ADMIN", "VIEWER"].includes(role))
       throw new ApiError(400, "Invalid admin role.");
     const user = await User.create({ name, email, password, role });
     await recordAdminActivity(
@@ -519,11 +589,25 @@ router.patch(
   asyncHandler(async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) throw new ApiError(404, "Admin not found.");
+    if (user.role === "OWNER") {
+      if (req.body.role !== undefined && req.body.role !== "OWNER") {
+        throw new ApiError(
+          400,
+          "Owner accounts cannot be demoted from admin access.",
+        );
+      }
+      if (req.body.active === false) {
+        throw new ApiError(
+          400,
+          "Owner accounts cannot be disabled from admin access.",
+        );
+      }
+    }
     if (user.id === req.user.id && req.body.active === false)
       throw new ApiError(400, "You cannot deactivate your own account.");
     if (
       req.body.role !== undefined &&
-      !["ADMIN", "VIEWER"].includes(req.body.role)
+      !["OWNER", "ADMIN", "VIEWER"].includes(req.body.role)
     )
       throw new ApiError(400, "Invalid admin role.");
     const previousRole = user.role;
@@ -580,6 +664,7 @@ router.delete(
 
     await User.findByIdAndDelete(user._id);
     await AdminSession.deleteMany({ user: user._id });
+    await AdminUsageDaily.deleteMany({ user: user._id });
     await recordAdminActivity(
       req,
       "DELETE",

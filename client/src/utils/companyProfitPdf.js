@@ -1,10 +1,10 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { money } from "./formatters.js";
+import { number } from "./formatters.js";
 
 const rateLabel = (values = []) =>
   values.length
-    ? [...new Set(values)].sort((left, right) => left - right).map(money).join(" / ")
+    ? [...new Set(values)].sort((left, right) => left - right).map(number).join(" / ")
     : "—";
 
 export function downloadCompanyProfitPdf({ company, filters, rows, totals }) {
@@ -25,12 +25,13 @@ export function downloadCompanyProfitPdf({ company, filters, rows, totals }) {
   doc.setFontSize(9);
   doc.setTextColor(82, 99, 93);
   doc.text(
-    `Date: ${filters.from} to ${filters.to}   Zone: ${filters.zone}   Team: ${filters.team}   Labour: ${filters.labours}`,
+    `Date: ${filters.from} to ${filters.to}   Zone: ${filters.zone}   Team: ${filters.team}   Labour: ${filters.labours}   Amounts: INR`,
     margin,
     31,
   );
 
-  const body = rows.map((row) => [
+  const body = rows.map((row, index) => [
+    index + 1,
     row.name,
     row.team,
     row.zone,
@@ -40,18 +41,19 @@ export function downloadCompanyProfitPdf({ company, filters, rows, totals }) {
     rateLabel(row.rates?.labourDaily),
     rateLabel(row.rates?.companyOvertime),
     rateLabel(row.rates?.labourOvertime),
-    money(row.dutyProfit),
-    money(row.overtimeProfit),
-    money(Number(row.companyBilling || 0) - Number(row.labourSalary || 0)),
+    number(row.dutyProfit),
+    number(row.overtimeProfit),
+    number(Number(row.companyBilling || 0) - Number(row.labourSalary || 0)),
   ]);
   body.push([
-    { content: "TOTAL", colSpan: 9, styles: { fontStyle: "bold" } },
-    { content: money(totals.dutyProfit), styles: { fontStyle: "bold" } },
-    { content: money(totals.overtimeProfit), styles: { fontStyle: "bold" } },
-    { content: money(totals.margin), styles: { fontStyle: "bold" } },
+    { content: "TOTAL", colSpan: 10, styles: { fontStyle: "bold" } },
+    { content: number(totals.dutyProfit), styles: { fontStyle: "bold" } },
+    { content: number(totals.overtimeProfit), styles: { fontStyle: "bold" } },
+    { content: number(totals.margin), styles: { fontStyle: "bold" } },
   ]);
   autoTable(doc, {
     head: [[
+      "Sr. No.",
       "Labour",
       "Team",
       "Zone",
@@ -65,7 +67,9 @@ export function downloadCompanyProfitPdf({ company, filters, rows, totals }) {
       "OT profit",
       "Total profit",
     ]],
-    body: body.length > 1 ? body : [["No labour activity", "", "", "", "", "", "", "", "", "", "", ""]],
+    body: body.length > 1
+      ? body
+      : [["", "No labour activity", "", "", "", "", "", "", "", "", "", "", ""]],
     startY: 37,
     margin: { left: margin, right: margin, top: 12, bottom: 12 },
     showHead: "everyPage",

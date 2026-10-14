@@ -4,12 +4,15 @@ import api, { request } from "./services/apiClient.js";
 import { LoadingPage } from "./components/ui/index.jsx";
 import { AppShell } from "./layout/AppShell.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
+import {
+  ADMIN_USAGE_PULSE_INTERVAL_MS,
+  isAdminUsageActive,
+} from "./utils/adminUsageTracking.js";
 
 const isValidSession = (session) =>
   Boolean(session?.user?.name && session?.user?.role);
 
 const cachedSessionKey = "labour-management-session-user";
-
 const readCachedSession = () => {
   try {
     const cached = JSON.parse(
@@ -86,11 +89,50 @@ export default function App() {
     if (!session) return undefined;
     let active = true;
     let heartbeatInProgress = false;
-    const heartbeat = async () => {
+    let lastActivityAt = Date.now();
+    let lastStoredActivityAt = lastActivityAt;
+    const activityStorageKey = `labour-management-last-activity-${
+      session.user.id || session.user.name
+    }`;
+    try {
+      window.localStorage.setItem(activityStorageKey, String(lastActivityAt));
+    } catch (error) {
+      console.warn("Unable to initialize shared administrator activity.", error);
+    }
+    const recordActivity = () => {
+      lastActivityAt = Date.now();
+      if (lastActivityAt - lastStoredActivityAt < 10_000) return;
+      lastStoredActivityAt = lastActivityAt;
+      try {
+        window.localStorage.setItem(activityStorageKey, String(lastActivityAt));
+      } catch (error) {
+        console.warn("Unable to share administrator activity across tabs.", error);
+      }
+    };
+    const heartbeat = async (trackUsage = false) => {
       if (heartbeatInProgress) return;
       heartbeatInProgress = true;
       try {
-        await api.post("/auth/session/heartbeat");
+        let payload;
+        if (trackUsage) {
+          try {
+            const sharedActivityAt = Number(
+              window.localStorage.getItem(activityStorageKey),
+            );
+            if (Number.isFinite(sharedActivityAt)) {
+              lastActivityAt = Math.max(lastActivityAt, sharedActivityAt);
+            }
+          } catch (error) {
+            console.warn(
+              "Unable to read shared administrator activity.",
+              error,
+            );
+          }
+          payload = {
+            active: isAdminUsageActive(lastActivityAt, Date.now()),
+          };
+        }
+        await api.post("/auth/session/heartbeat", payload);
       } catch (error) {
         if (error.response?.status === 401 && active) {
           clearCachedSession();
@@ -104,15 +146,31 @@ export default function App() {
       }
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") heartbeat();
+      if (document.visibilityState === "visible") heartbeat(true);
     };
-    heartbeat();
-    const intervalId = window.setInterval(heartbeat, 10 * 60 * 1000);
+    const activityEvents = [
+      "pointerdown",
+      "pointermove",
+      "keydown",
+      "touchstart",
+      "scroll",
+    ];
+    activityEvents.forEach((eventName) =>
+      document.addEventListener(eventName, recordActivity, { passive: true }),
+    );
+    heartbeat(true);
+    const intervalId = window.setInterval(
+      () => heartbeat(true),
+      ADMIN_USAGE_PULSE_INTERVAL_MS,
+    );
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       active = false;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      activityEvents.forEach((eventName) =>
+        document.removeEventListener(eventName, recordActivity),
+      );
     };
   }, [session, navigate]);
   const authenticated = (data) => {

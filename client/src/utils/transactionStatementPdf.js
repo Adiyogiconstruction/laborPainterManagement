@@ -65,6 +65,7 @@ export function createTransactionStatementPdf({
   orientation = "portrait",
   includeWorker = true,
   includeBalance = false,
+  includeSerialNumber = false,
   balanceValue,
   balanceLabel,
 }) {
@@ -159,14 +160,15 @@ export function createTransactionStatementPdf({
     );
   });
 
-  const headers = ["Date"];
+  const headers = includeSerialNumber ? ["Sr. No.", "Date"] : ["Date"];
   if (includeWorker) headers.push("Name");
   headers.push("Details");
   if (includeBalance) headers.push("Method");
   headers.push("Debit (-)", "Credit (+)");
   if (includeBalance) headers.push("Balance");
-  const rows = payments.map((payment) => {
-    const row = [formatDate(payment.paidOn)];
+  const rows = payments.map((payment, index) => {
+    const row = includeSerialNumber ? [String(index + 1)] : [];
+    row.push(formatDate(payment.paidOn));
     if (includeWorker) row.push(payment.worker?.name || "Business expense");
     row.push(paymentDetails(payment, !includeBalance) || "—");
     if (includeBalance) row.push(payment.method || "—");
@@ -185,7 +187,18 @@ export function createTransactionStatementPdf({
   });
   const columnStyles = includeBalance
     ? includeWorker
-      ? {
+      ? includeSerialNumber
+        ? {
+            0: { cellWidth: 10, halign: "center" },
+            1: { cellWidth: 20 },
+            2: { cellWidth: 32 },
+            3: { cellWidth: 78 },
+            4: { cellWidth: 24 },
+            5: { cellWidth: 34, halign: "right", textColor: [165, 61, 57] },
+            6: { cellWidth: 34, halign: "right", textColor: [24, 125, 96] },
+            7: { cellWidth: 34, halign: "right" },
+          }
+        : {
         0: { cellWidth: 22 },
         1: { cellWidth: 35 },
         2: { cellWidth: 90 },
@@ -193,27 +206,58 @@ export function createTransactionStatementPdf({
         4: { cellWidth: 35, halign: "right", textColor: [165, 61, 57] },
         5: { cellWidth: 35, halign: "right", textColor: [24, 125, 96] },
         6: { cellWidth: 34, halign: "right" },
-        }
+          }
       : {
+        ...(includeSerialNumber
+          ? {
+              0: { cellWidth: 10, halign: "center" },
+              1: { cellWidth: 18 },
+              2: { cellWidth: 64 },
+              3: { cellWidth: 22 },
+              4: { cellWidth: 22, halign: "right", textColor: [165, 61, 57] },
+              5: { cellWidth: 22, halign: "right", textColor: [24, 125, 96] },
+              6: { cellWidth: 20, halign: "right" },
+            }
+          : {
         0: { cellWidth: 20 },
         1: { cellWidth: 76 },
         2: { cellWidth: 24 },
         3: { cellWidth: 24, halign: "right", textColor: [165, 61, 57] },
         4: { cellWidth: 24, halign: "right", textColor: [24, 125, 96] },
         5: { cellWidth: 22, halign: "right" },
+            })
         }
     : {
-        0: { cellWidth: 23 },
-        1: { cellWidth: 38 },
-        2: { cellWidth: 70 },
-        3: { cellWidth: 29, halign: "right", textColor: [165, 61, 57] },
-        4: { cellWidth: 30, halign: "right", textColor: [24, 125, 96] },
+        ...(includeSerialNumber
+          ? {
+              0: { cellWidth: 10, halign: "center" },
+              1: { cellWidth: 19 },
+              2: { cellWidth: 30 },
+              3: { cellWidth: 65 },
+              4: { cellWidth: 28, halign: "right", textColor: [165, 61, 57] },
+              5: { cellWidth: 28, halign: "right", textColor: [24, 125, 96] },
+            }
+          : {
+              0: { cellWidth: 23 },
+              1: { cellWidth: 38 },
+              2: { cellWidth: 70 },
+              3: { cellWidth: 29, halign: "right", textColor: [165, 61, 57] },
+              4: { cellWidth: 30, halign: "right", textColor: [24, 125, 96] },
+            }),
       };
   autoTable(doc, {
     head: [headers],
     body: rows.length
       ? rows
-      : [headers.map((_, index) => (index === 0 ? "—" : index === 1 ? "No transactions recorded." : "—"))],
+      : [
+          headers.map((_, index) =>
+            index === 0
+              ? "—"
+              : index === (includeSerialNumber ? (includeWorker ? 3 : 2) : includeWorker ? 2 : 1)
+                ? "No transactions recorded."
+                : "—",
+          ),
+        ],
     startY: summaryY + 22,
     margin: { left: margin, right: margin, top: 40, bottom: 13 },
     showHead: "everyPage",

@@ -502,12 +502,13 @@ router.get(
       Worker.find(workerFilter)
         .select("_id name workZone active teamName companyName defaultDailyRate overtimeHourlyRate rateHistory rateHistoryFallbackToZone")
         .sort({ name: 1 })
+        .collation({ locale: "en", strength: 2 })
         .lean(),
       Worker.distinct("workZone", {
         companyName: company.name,
         deletedAt: null,
         type: "LABOUR",
-      }),
+      }).collation({ locale: "en", strength: 2 }),
     ]);
     const zoneNames = [
       ...new Map(
@@ -543,21 +544,21 @@ router.get(
         },
         {
           company: null,
-          companyName: "",
+          $or: [{ companyName: "" }, { companyName: { $exists: false } }],
           worker: { $in: currentWorkerIds },
         },
       ],
     })
       .select("worker company companyName date status workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate companyOvertimeRate workZone")
       .sort({ date: 1 })
+      .collation({ locale: "en", strength: 2 })
       .lean();
     const attendanceWorkerIds = [
       ...new Set(attendance.map((record) => String(record.worker))),
     ];
     const historicalWorkers = attendanceWorkerIds.length
-      ? await Worker.find({
+      ? await       Worker.find({
           _id: { $in: attendanceWorkerIds },
-          deletedAt: null,
           type: "LABOUR",
         })
           .select("_id name workZone active teamName companyName defaultDailyRate overtimeHourlyRate rateHistory rateHistoryFallbackToZone")
@@ -1193,10 +1194,28 @@ router.patch(
     await company.save();
     await saveCompanyZoneRates(company, zoneRates, req.user.id);
     if (previousName !== company.name) {
-      await Worker.updateMany(
-        { companyName: previousName },
-        { $set: { companyName: company.name } },
-      );
+      const caseInsensitive = { collation: { locale: "en", strength: 2 } };
+      await Promise.all([
+        Worker.updateMany(
+          { companyName: previousName },
+          { $set: { companyName: company.name } },
+          caseInsensitive,
+        ),
+        Attendance.updateMany(
+          {
+            $or: [
+              { company: company._id },
+              { company: null, companyName: previousName },
+            ],
+          },
+          { $set: { companyName: company.name } },
+          caseInsensitive,
+        ),
+        CompanyLabourAssignment.updateMany(
+          { company: company._id },
+          { $set: { companyName: company.name } },
+        ),
+      ]);
     }
     if (zoneRates) {
       await applyCompanyZoneRateChanges(

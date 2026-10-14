@@ -59,6 +59,22 @@ test("statement PDF supports empty statements and multiple transaction rows", ()
   assert.equal(emptyDoc.internal.getNumberOfPages(), 1);
 });
 
+test("Reports transaction statement supports a numbered serial column", () => {
+  const doc = createTransactionStatementPdf({
+    profile,
+    from: "2026-09-01",
+    to: "2026-09-30",
+    payments,
+    includeSerialNumber: true,
+  });
+
+  assert.equal(doc.lastAutoTable.head[0].raw[0], "Sr. No.");
+  assert.deepEqual(
+    doc.lastAutoTable.body.map((row) => row.cells["0"].text.join("")),
+    ["1", "2"],
+  );
+});
+
 test("statement PDF paginates the complete transaction list", () => {
   const doc = createTransactionStatementPdf({
     profile,
@@ -86,6 +102,7 @@ test("labour khata PDFs support account and master transaction layouts", () => {
     subtitle: "Worker One · 9000000000 · North zone",
     includeWorker: false,
     includeBalance: true,
+    includeSerialNumber: true,
     balanceValue: 1600,
     balanceLabel: "CURRENT BALANCE",
   });
@@ -101,12 +118,42 @@ test("labour khata PDFs support account and master transaction layouts", () => {
     orientation: "landscape",
     includeWorker: true,
     includeBalance: true,
+    includeSerialNumber: true,
   });
 
   assert.ok(Math.abs(accountDoc.internal.pageSize.getWidth() - 210) < 0.01);
   assert.ok(Math.abs(masterDoc.internal.pageSize.getWidth() - 297) < 0.01);
   assert.ok(accountDoc.output("arraybuffer").byteLength > 0);
   assert.ok(masterDoc.output("arraybuffer").byteLength > 0);
+  for (const doc of [accountDoc, masterDoc]) {
+    assert.equal(doc.lastAutoTable.head[0].raw[0], "Sr. No.");
+    assert.deepEqual(
+      doc.lastAutoTable.body.map((row) => row.cells["0"].text.join("")),
+      ["1", "2"],
+    );
+  }
+});
+
+test("payment page serial numbers continue across PDF pages", () => {
+  const doc = createTransactionStatementPdf({
+    profile,
+    from: "2026-09-01",
+    to: "2026-09-30",
+    payments: Array.from({ length: 100 }, (_, index) => ({
+      ...payments[0],
+      _id: String(index),
+      notes: `Transaction detail ${index + 1}`,
+    })),
+    title: "LABOUR PAYMENT KHATA",
+    includeWorker: false,
+    includeBalance: true,
+    includeSerialNumber: true,
+  });
+
+  assert.ok(doc.internal.getNumberOfPages() > 1);
+  const rows = doc.lastAutoTable.body;
+  assert.equal(rows[0].cells["0"].text.join(""), "1");
+  assert.equal(rows.at(-1).cells["0"].text.join(""), "100");
 });
 
 test("statement PDF rejects missing company identity and invalid transactions", () => {

@@ -112,12 +112,13 @@ export function createAdminActivityPdf({
   }
   headerY += 3;
 
-  const rows = activities.map((activity) => {
+  const rows = activities.map((activity, index) => {
     const context = Object.entries(activity.meta || {})
       .filter(([, value]) => value !== undefined && value !== null && value !== "")
       .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
       .join("\n");
     return [
+      String(index + 1),
       formatDateTime(activity.createdAt),
       String(activity.action || "ACTIVITY").replaceAll("_", " "),
       [activity.message || "—", context ? `Context: ${context}` : ""]
@@ -127,8 +128,10 @@ export function createAdminActivityPdf({
   });
 
   autoTable(doc, {
-    head: [["Date & time", "Action", "Details"]],
-    body: rows.length ? rows : [["—", "—", "No activity recorded."]],
+    head: [["Sr. No.", "Date & time", "Action", "Details"]],
+    body: rows.length
+      ? rows
+      : [["—", "—", "—", "No activity recorded."]],
     startY: headerY,
     margin: { left: margin, right: margin, top: 14, bottom: 14 },
     showHead: "everyPage",
@@ -149,9 +152,10 @@ export function createAdminActivityPdf({
       fontStyle: "bold",
     },
     columnStyles: {
-      0: { cellWidth: 39 },
-      1: { cellWidth: 34 },
-      2: { cellWidth: "auto" },
+      0: { cellWidth: 14, halign: "center" },
+      1: { cellWidth: 36 },
+      2: { cellWidth: 32 },
+      3: { cellWidth: "auto" },
     },
     didDrawPage() {
       const pageHeight = doc.internal.pageSize.getHeight();

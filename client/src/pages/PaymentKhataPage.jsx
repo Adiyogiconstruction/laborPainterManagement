@@ -324,6 +324,12 @@ export function PaymentKhataPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [balanceFilter, setBalanceFilter] = useState("ALL");
   const [sortOrder, setSortOrder] = useState("RECENT");
+  const [accountFrom, setAccountFrom] = useState("");
+  const [accountTo, setAccountTo] = useState("");
+  const [appliedAccountRange, setAppliedAccountRange] = useState({
+    from: "",
+    to: "",
+  });
   const [paymentKindFilter, setPaymentKindFilter] = useState("");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("");
   const [from, setFrom] = useState("");
@@ -353,14 +359,22 @@ export function PaymentKhataPage() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [error, setError] = useState("");
   const [loadingWorkers, setLoadingWorkers] = useState(true);
+  const [selectedWorkerDetail, setSelectedWorkerDetail] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const paymentsRequestId = useRef(0);
   const refreshInProgress = useRef(false);
 
-  const loadWorkers = useCallback(async () => {
+  const loadWorkers = useCallback(async (dateRange = { from: "", to: "" }) => {
+    setLoadingWorkers(true);
     try {
       const { workers: result } = await request(
-        api.get("/workers", { params: { type: "LABOUR" } }),
+        api.get("/workers", {
+          params: {
+            type: "LABOUR",
+            ...(dateRange.from ? { from: dateRange.from } : {}),
+            ...(dateRange.to ? { to: dateRange.to } : {}),
+          },
+        }),
       );
       setWorkers(result || []);
       setSelectedWorkerId((current) =>
@@ -368,8 +382,10 @@ export function PaymentKhataPage() {
           ? current
           : result?.[0]?._id || "",
       );
+      return true;
     } catch (err) {
       setError(errorMessage(err));
+      return false;
     } finally {
       setLoadingWorkers(false);
     }
@@ -414,6 +430,25 @@ export function PaymentKhataPage() {
     loadWorkers();
   }, [loadWorkers]);
   useEffect(() => {
+    if (!selectedWorkerId) {
+      setSelectedWorkerDetail(null);
+      return;
+    }
+    let active = true;
+
+    request(api.get(`/workers/${selectedWorkerId}`))
+      .then((result) => {
+        if (active) setSelectedWorkerDetail(result);
+      })
+      .catch(() => {
+        if (active) setSelectedWorkerDetail(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedWorkerId]);
+  useEffect(() => {
     loadPayments();
   }, [loadPayments]);
   const refreshPaymentData = useCallback(async () => {
@@ -422,7 +457,7 @@ export function PaymentKhataPage() {
     setRefreshing(true);
     setError("");
     try {
-      await Promise.all([loadWorkers(), loadPayments()]);
+      await Promise.all([loadWorkers(appliedAccountRange), loadPayments()]);
       if (showRecycleBin) await loadDeletedPayments();
       if (reportOpen) await loadMasterReport();
     } finally {
@@ -432,6 +467,7 @@ export function PaymentKhataPage() {
   }, [
     loadWorkers,
     loadPayments,
+    appliedAccountRange,
     showRecycleBin,
     loadDeletedPayments,
     loadMasterReport,
@@ -489,15 +525,41 @@ export function PaymentKhataPage() {
       ].sort((left, right) => left.localeCompare(right)),
     [workers],
   );
-  const accountWorkers = workers.filter(
-    (worker) =>
-      (!companyFilter || worker.companyName === companyFilter) &&
-      (!teamFilter || worker.teamName === teamFilter) &&
-      (!zoneFilter || worker.workZone === zoneFilter) &&
-      (statusFilter === "ALL" ||
-        (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
-          statusFilter),
-  );
+  const accountWorkers = workers
+    .map((worker) =>
+      appliedAccountRange.from || appliedAccountRange.to
+        ? {
+            ...worker,
+            totalDue: Number(worker.periodDue || 0),
+            overpaid: Number(worker.periodOverpaid || 0),
+          }
+        : worker,
+    )
+    .filter((worker) => {
+      const query = workerSearch.trim().toLocaleLowerCase();
+      const matchesSearch =
+        !query ||
+        [
+          worker.name,
+          worker.phone,
+          worker.companyName,
+          worker.teamName,
+          worker.workZone,
+        ].some((value) =>
+          String(value || "")
+            .toLocaleLowerCase()
+            .includes(query),
+        );
+      return (
+        matchesSearch &&
+        (!companyFilter || worker.companyName === companyFilter) &&
+        (!teamFilter || worker.teamName === teamFilter) &&
+        (!zoneFilter || worker.workZone === zoneFilter) &&
+        (statusFilter === "ALL" ||
+          (worker.labourStatus || (worker.active ? "ACTIVE" : "INACTIVE")) ===
+            statusFilter)
+      );
+    });
   const dueCount = accountWorkers.filter(
     (worker) => balanceType(worker) === "DENA_HAI",
   ).length;
@@ -513,7 +575,7 @@ export function PaymentKhataPage() {
     0,
   );
   const visibleWorkers = useMemo(() => {
-    return filterAndSortWorkers(workers, {
+    return filterAndSortWorkers(accountWorkers, {
       search: workerSearch,
       company: companyFilter,
       team: teamFilter,
@@ -523,7 +585,7 @@ export function PaymentKhataPage() {
       sort: sortOrder,
     });
   }, [
-    workers,
+    accountWorkers,
     workerSearch,
     companyFilter,
     teamFilter,
@@ -544,6 +606,41 @@ export function PaymentKhataPage() {
   const selectedWorkerBalance =
     Number(selectedWorker?.totalDue || 0) -
     Number(selectedWorker?.overpaid || 0);
+  const salaryBreakdown = useMemo(() => {
+    const worker = selectedWorker || selectedWorkerDetail?.worker;
+    if (!worker) return null;
+
+    const dayRate = Number(worker.defaultDailyRate || 0);
+    const otRate = Number(worker.overtimeHourlyRate || 0);
+    const payable = Number(
+      worker.totalPayable || selectedWorkerDetail?.attendanceSummary?.totalPayable || 0,
+    );
+    const presentDaysFromSummary = Number(
+      selectedWorkerDetail?.attendanceSummary?.presentDays || 0,
+    );
+    const presentDays =
+      presentDaysFromSummary ||
+      (dayRate > 0 ? Math.max(0, Math.floor(payable / dayRate)) : 0);
+    const dayComponent = Math.min(payable, presentDays * dayRate);
+    const otComponent = Math.max(0, payable - dayComponent);
+    const computedOtHours = otRate > 0 ? Math.round(otComponent / otRate) : 0;
+    const total = Math.max(0, dayComponent + otComponent);
+
+    if (!payable && !dayRate && !otRate) return null;
+
+    return {
+      presentDays: presentDays || 0,
+      dayRate,
+      otRate,
+      otHours: computedOtHours,
+      payable,
+      dayComponent,
+      otComponent,
+      total,
+      formula: `${presentDays || 0} days × ${money(dayRate)} + (${computedOtHours} OT hrs × ${money(otRate)})`,
+      calculation: `${money(dayComponent)} + ${money(otComponent)} = ${money(total)}`,
+    };
+  }, [selectedWorker, selectedWorkerDetail]);
   const entries = useMemo(
     () => paymentBalances(payments, selectedWorkerBalance),
     [payments, selectedWorkerBalance],
@@ -695,6 +792,7 @@ export function PaymentKhataPage() {
           .join(" · "),
         includeWorker: false,
         includeBalance: true,
+        includeSerialNumber: true,
         balanceValue: selectedWorkerBalance,
         balanceLabel: "CURRENT BALANCE",
         fileName: `labour-khata-${selectedWorker.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`,
@@ -734,19 +832,26 @@ export function PaymentKhataPage() {
         ...payment,
         balanceAfter: balanceById.get(payment._id),
       }));
+      const paymentDates = reportEntries
+        .map((payment) => new Date(payment.paidOn).toISOString().slice(0, 10))
+        .sort();
+      const periodFrom = reportFrom || paymentDates[0] || inputDate();
+      const periodTo =
+        reportTo || paymentDates[paymentDates.length - 1] || periodFrom;
       downloadTransactionStatementPdf({
         profile,
-        from: reportFrom || inputDate(),
-        to: reportTo || inputDate(),
+        from: periodFrom,
+        to: periodTo,
         payments,
         title: "ALL LABOUR TRANSACTIONS",
         subtitle: `${payments.length} entries`,
         orientation: "landscape",
         includeWorker: true,
         includeBalance: true,
+        includeSerialNumber: true,
         balanceValue: reportNet,
         balanceLabel: "PERIOD BALANCE",
-        fileName: `all-labour-transactions-${reportFrom || "all-dates"}-to-${reportTo || "all-dates"}.pdf`,
+        fileName: `all-labour-transactions-${periodFrom}-to-${periodTo}.pdf`,
       });
     } catch (err) {
       setReportError(errorMessage(err));
@@ -758,6 +863,32 @@ export function PaymentKhataPage() {
   const handleBalanceTab = (value) => {
     setBalanceFilter(value);
     setPage(1);
+  };
+  const applyAccountDateRange = async () => {
+    if (accountFrom && accountTo && accountFrom > accountTo) {
+      setError("From date cannot be after To date.");
+      return;
+    }
+    const range = { from: accountFrom, to: accountTo };
+    setError("");
+    setPage(1);
+    if (await loadWorkers(range)) {
+      setAppliedAccountRange(range);
+      setReportFrom(range.from);
+      setReportTo(range.to);
+    }
+  };
+  const resetAccountDateRange = async () => {
+    setAccountFrom("");
+    setAccountTo("");
+    setError("");
+    setPage(1);
+    const range = { from: "", to: "" };
+    if (await loadWorkers(range)) {
+      setAppliedAccountRange(range);
+      setReportFrom("");
+      setReportTo("");
+    }
   };
   const handleSelectWorker = (worker) => {
     setSelectedWorkerId(worker._id);
@@ -802,7 +933,11 @@ export function PaymentKhataPage() {
       >
         <Panel
           title="Labour accounts"
-          detail={`${companyFilter || "All companies"} · ${accountWorkers.length} labour profiles`}
+          detail={`${companyFilter || "All companies"} · ${accountWorkers.length} labour profiles${
+            appliedAccountRange.from || appliedAccountRange.to
+              ? ` · Balance period: ${appliedAccountRange.from ? date(appliedAccountRange.from) : "Beginning"} – ${appliedAccountRange.to ? date(appliedAccountRange.to) : "Today"}`
+              : " · All-time balance"
+          }`}
           className={styles["payment-khata-list-panel"]}
           action={
             <div className={styles["payment-list-toolbar"]}>
@@ -885,6 +1020,41 @@ export function PaymentKhataPage() {
             </div>
           }
         >
+          <div className={styles["khata-account-date-filters"]}>
+            <Field label="From Date">
+              <input
+                type="date"
+                value={accountFrom}
+                max={accountTo || undefined}
+                onChange={(event) => setAccountFrom(event.target.value)}
+              />
+            </Field>
+            <Field label="To Date">
+              <input
+                type="date"
+                value={accountTo}
+                min={accountFrom || undefined}
+                onChange={(event) => setAccountTo(event.target.value)}
+              />
+            </Field>
+            <Button
+              type="button"
+              className={styles["button-primary"]}
+              onClick={applyAccountDateRange}
+              loading={loadingWorkers}
+            >
+              Apply
+            </Button>
+            <Button
+              type="button"
+              className={styles["button-ghost"]}
+              onClick={resetAccountDateRange}
+              disabled={loadingWorkers}
+            >
+              Reset
+            </Button>
+          </div>
+          {error && <ErrorNote error={error} />}
           <div className={styles["khata-balance-tabs"]}>
             {[
               ["ALL", "All labour", accountWorkers.length],
@@ -907,6 +1077,10 @@ export function PaymentKhataPage() {
             </span>
             <span className={styles["lena-hai"]}>
               Lena hai <strong>{money(totalOverpaid)}</strong>
+            </span>
+            <span className={styles["khata-period-net"]}>
+              Net balance{" "}
+              <strong>{money(totalDue - totalOverpaid)}</strong>
             </span>
             <Button
               type="button"
@@ -1169,6 +1343,27 @@ export function PaymentKhataPage() {
                 </Field>
               </div>
               <ErrorNote error={error} />
+              {salaryBreakdown && Number(salaryBreakdown.total) > 0 && (
+                <div className={styles["khata-salary-summary"]}>
+                  <div className={styles["khata-salary-copy"]}>
+                    <span className={styles["khata-salary-label"]}>
+                      SAMPLE CALCULATION
+                    </span>
+                    <strong className={styles["khata-salary-total"]}>
+                      Salary — {money(salaryBreakdown.total)}
+                    </strong>
+                    <small className={styles["khata-salary-formula"]}>
+                      {salaryBreakdown.formula}
+                    </small>
+                    <em className={styles["khata-salary-calculation"]}>
+                      {salaryBreakdown.calculation}
+                    </em>
+                  </div>
+                  <span className={styles["khata-salary-note"]}>
+                    Days aur rates sirf example hai; actual attendance aur rates se calculate karen.
+                  </span>
+                </div>
+              )}
               <div className={styles["table-wrap"]}>
                 <table className={styles["khata-entry-table"]}>
                   <thead>
