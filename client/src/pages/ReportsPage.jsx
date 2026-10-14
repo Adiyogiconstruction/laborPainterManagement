@@ -123,6 +123,7 @@ export function ReportsPage() {
   const [workerOptions, setWorkerOptions] = useState([]);
   const [companyProfile, setCompanyProfile] = useState(null);
   const [companyProfileLoading, setCompanyProfileLoading] = useState(true);
+  const [companyProfileError, setCompanyProfileError] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [workZoneFilter, setWorkZoneFilter] = useState("");
@@ -297,7 +298,12 @@ export function ReportsPage() {
   useEffect(() => {
     request(api.get("/company-profile"))
       .then(({ profile }) => setCompanyProfile(profile))
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => {
+        setCompanyProfileError(
+          "Report data is available, but PDF export is unavailable because company details could not be loaded.",
+        );
+        console.warn("Company profile unavailable for report PDF branding:", err);
+      })
       .finally(() => setCompanyProfileLoading(false));
   }, []);
   const rowsForPage = (key, rows = []) => {
@@ -400,6 +406,7 @@ export function ReportsPage() {
           </Button>
         }
       />
+      <ErrorNote error={companyProfileError} />
       <Panel
         className="report-filter-panel"
         title="Report filters"

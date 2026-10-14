@@ -377,7 +377,12 @@ export function AdminsPage() {
     load();
     request(api.get("/company-profile"))
       .then(({ profile }) => setCompanyProfile(profile))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) =>
+        console.warn(
+          "Company profile unavailable for admin PDF branding:",
+          err,
+        ),
+      );
   }, []);
   useEffect(() => {
     loadUsage(appliedUsageFilters.from, appliedUsageFilters.to);

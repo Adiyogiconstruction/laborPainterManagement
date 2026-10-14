@@ -81,7 +81,12 @@ function MonthlyAttendance() {
   useEffect(() => {
     request(api.get("/company-profile"))
       .then(({ profile }) => setCompanyProfile(profile || null))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) =>
+        console.warn(
+          "Company profile unavailable for attendance PDF branding:",
+          err,
+        ),
+      );
   }, []);
 
   const handleGridKeyDown = (event) => {

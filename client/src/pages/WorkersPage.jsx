@@ -750,7 +750,6 @@ function WorkerHistory({ worker, onClose }) {
   const [data, setData] = useState();
   const [companyProfile, setCompanyProfile] = useState();
   const [companyProfileLoaded, setCompanyProfileLoaded] = useState(false);
-  const [companyProfileError, setCompanyProfileError] = useState("");
   const [error, setError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [registrationGenerating, setRegistrationGenerating] = useState(false);
@@ -812,13 +811,15 @@ function WorkerHistory({ worker, onClose }) {
       .then(({ profile }) => {
         if (active) {
           setCompanyProfile(profile);
-          setCompanyProfileError("");
         }
       })
       .catch((err) => {
         if (active) {
           setCompanyProfile(null);
-          setCompanyProfileError(errorMessage(err));
+          console.warn(
+            "Company profile unavailable for worker registration PDF branding:",
+            err,
+          );
         }
       })
       .finally(() => {
@@ -877,7 +878,7 @@ function WorkerHistory({ worker, onClose }) {
         </Button>
       }
     >
-      <ErrorNote error={error || companyProfileError} />
+      <ErrorNote error={error} />
       <div className={`${styles["toolbar"]} ${styles["filter-bar"]}`}>
         <Field label="History month">
           <input type="month" value={month} onChange={changeMonth} />
