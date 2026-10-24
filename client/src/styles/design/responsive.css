@@ -1445,7 +1445,6 @@
     z-index: 8;
     height: auto;
     min-height: 62px;
-    padding-top: env(safe-area-inset-top);
   }
   .report-tabs {
     flex-wrap: nowrap;
