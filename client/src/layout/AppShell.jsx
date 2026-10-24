@@ -109,7 +109,7 @@ export function AppShell({ session, onLogout }) {
           />
           <div>
             <strong>Adiyogi Construction</strong>
-            <span>Business Management</span>
+            <span>Labour Management</span>
           </div>
           <button
             className={`${styles["mobile-close"]} ${styles["icon-button"]}`}
