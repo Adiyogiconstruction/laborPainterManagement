@@ -369,8 +369,11 @@ export function PaymentKhataPage() {
   const [salarySummaryLoading, setSalarySummaryLoading] = useState(false);
   const [salarySummaryError, setSalarySummaryError] = useState("");
   const [salaryCalculationOpen, setSalaryCalculationOpen] = useState(false);
+  const [carryForwardConfirmationOpen, setCarryForwardConfirmationOpen] =
+    useState(false);
+  const [carryForwardSaving, setCarryForwardSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const salaryMonth = useMemo(currentCalendarMonth, []);
+  const [salaryMonth, setSalaryMonth] = useState(currentCalendarMonth);
   const paymentsRequestId = useRef(0);
   const salarySummaryRequestId = useRef(0);
   const refreshInProgress = useRef(false);
@@ -473,12 +476,52 @@ export function PaymentKhataPage() {
       }
     }
   }, [selectedWorkerId, salaryMonth]);
+  const confirmCarryForward = async () => {
+    if (!selectedWorkerId || !salaryBreakdown) return;
+    setCarryForwardSaving(true);
+    setSalarySummaryError("");
+    try {
+      await request(
+        api.post(
+          `/workers/${selectedWorkerId}/salary-summary/carry-forward`,
+          { month: salaryMonth },
+        ),
+      );
+      setCarryForwardConfirmationOpen(false);
+      await loadSalarySummary();
+    } catch (err) {
+      setSalarySummaryError(errorMessage(err));
+    } finally {
+      setCarryForwardSaving(false);
+    }
+  };
+  const undoCarryForward = async () => {
+    if (!selectedWorkerId) return;
+    setCarryForwardSaving(true);
+    setSalarySummaryError("");
+    try {
+      await request(
+        api.delete(
+          `/workers/${selectedWorkerId}/salary-summary/carry-forward`,
+          { params: { month: salaryMonth } },
+        ),
+      );
+      await loadSalarySummary();
+    } catch (err) {
+      setSalarySummaryError(errorMessage(err));
+    } finally {
+      setCarryForwardSaving(false);
+    }
+  };
   useEffect(() => {
     loadSalarySummary();
     return () => {
       salarySummaryRequestId.current += 1;
     };
   }, [loadSalarySummary]);
+  useEffect(() => {
+    setCarryForwardConfirmationOpen(false);
+  }, [selectedWorkerId, salaryMonth]);
   useEffect(() => {
     loadPayments();
   }, [loadPayments]);
@@ -1346,6 +1389,22 @@ export function PaymentKhataPage() {
                     onChange={(event) => setTo(event.target.value)}
                   />
                 </Field>
+                <Button
+                  type="button"
+                  className={styles["button-ghost"]}
+                  onClick={() => {
+                    setPaymentKindFilter("");
+                    setPaymentMethodFilter("");
+                    setFrom("");
+                    setTo("");
+                    setPage(1);
+                  }}
+                  disabled={
+                    !paymentKindFilter && !paymentMethodFilter && !from && !to
+                  }
+                >
+                  Clear filters
+                </Button>
               </div>
               <ErrorNote error={error} />
               {selectedWorker && (
@@ -1366,19 +1425,36 @@ export function PaymentKhataPage() {
                   </div>
                   {salaryCalculationOpen && (
                     <div className={styles["khata-salary-summary"]}>
+                      <div className={styles["khata-salary-header"]}>
+                        <span className={styles["khata-salary-label"]}>
+                          {new Intl.DateTimeFormat("en-IN", {
+                            month: "long",
+                            year: "numeric",
+                          }).format(new Date(`${salaryMonth}-01T00:00:00`))}{" "}
+                          SALARY CALCULATION
+                        </span>
+                        <Field label="Calculation month">
+                          <input
+                            type="month"
+                            value={salaryMonth}
+                            max={currentCalendarMonth()}
+                            onChange={(event) => {
+                              if (event.target.value) {
+                                setSalaryMonth(event.target.value);
+                              }
+                            }}
+                          />
+                        </Field>
+                      </div>
                       {salarySummaryLoading ? (
                         <p>Loading attendance calculation…</p>
                       ) : salarySummaryError ? (
                         <p>{salarySummaryError}</p>
                       ) : salaryBreakdown ? (
                         <div className={styles["khata-salary-copy"]}>
-                          <span className={styles["khata-salary-label"]}>
-                            {salaryBreakdown.monthLabel
-                              ? `${salaryBreakdown.monthLabel} SALARY CALCULATION`
-                              : "SALARY CALCULATION"}
-                          </span>
                           <strong className={styles["khata-salary-total"]}>
-                            Current month salary — {money(salaryBreakdown.total)}
+                            {salaryBreakdown.monthLabel} salary —{" "}
+                            {money(salaryBreakdown.total)}
                           </strong>
                           <small className={styles["khata-salary-formula"]}>
                             {salaryBreakdown.formula}
@@ -1386,10 +1462,46 @@ export function PaymentKhataPage() {
                           <em className={styles["khata-salary-calculation"]}>
                             {salaryBreakdown.calculation}
                           </em>
-                          <small className={styles["khata-salary-formula"]}>
-                            Previous balance carried forward:{" "}
-                            {money(salaryBreakdown.previousDue)}
-                          </small>
+                          {(salaryBreakdown.previousDue !== 0 ||
+                            salaryBreakdown.carryForwardConfirmed) && (
+                            <div
+                              className={
+                                styles["khata-salary-carry-forward"]
+                              }
+                            >
+                              <small
+                                className={styles["khata-salary-formula"]}
+                              >
+                                {salaryBreakdown.carryForwardConfirmed
+                                  ? "Previous balance included:"
+                                  : salaryBreakdown.previousDue < 0
+                                    ? "Previous extra / credit available:"
+                                    : "Previous due available:"}{" "}
+                                {money(Math.abs(salaryBreakdown.previousDue))}
+                              </small>
+                              {salaryBreakdown.carryForwardConfirmed ? (
+                                <Button
+                                  type="button"
+                                  className={styles["button-ghost"]}
+                                  onClick={undoCarryForward}
+                                  loading={carryForwardSaving}
+                                >
+                                  Undo carry-forward
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  className={styles["button-secondary"]}
+                                  onClick={() =>
+                                    setCarryForwardConfirmationOpen(true)
+                                  }
+                                  disabled={carryForwardSaving}
+                                >
+                                  Add previous balance
+                                </Button>
+                              )}
+                            </div>
+                          )}
                           <small className={styles["khata-salary-formula"]}>
                             Paid this month:{" "}
                             {money(salaryBreakdown.paidThisMonth)}
@@ -1403,12 +1515,12 @@ export function PaymentKhataPage() {
                           >
                             {salaryBreakdown.amountDue < 0
                               ? `Extra paid / credit — ${money(Math.abs(salaryBreakdown.amountDue))}`
-                              : `Due including previous balance — ${money(salaryBreakdown.amountDue)}`}
+                              : `${salaryBreakdown.carryForwardConfirmed ? "Due including previous balance" : "Due this month"} — ${money(salaryBreakdown.amountDue)}`}
                           </strong>
                         </div>
                       ) : (
                         <p>
-                          No current-month salary or carried balance to show.
+                          No salary or carried balance for this month.
                         </p>
                       )}
                     </div>
@@ -1885,6 +1997,51 @@ export function PaymentKhataPage() {
               onClick={() => setSettingsOpen(false)}
             >
               Done
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {carryForwardConfirmationOpen && salaryBreakdown && (
+        <Modal
+          title="Add previous balance to this calculation?"
+          onClose={
+            carryForwardSaving
+              ? () => {}
+              : () => setCarryForwardConfirmationOpen(false)
+          }
+        >
+          <p>
+            {salaryBreakdown.previousDue < 0
+              ? "This will include the previous extra/credit"
+              : "This will include the previous unpaid due"}{" "}
+            of{" "}
+            <strong>
+              {money(Math.abs(salaryBreakdown.previousDue))}
+            </strong>{" "}
+            in {salaryBreakdown.monthLabel}.
+          </p>
+          <p>
+            This changes only the salary calculation, not the payment ledger.
+            Your choice is saved for this labour and month. You can undo it
+            from the calculation card.
+          </p>
+          {salarySummaryError && <ErrorNote error={salarySummaryError} />}
+          <div className={styles["modal-actions"]}>
+            <Button
+              type="button"
+              className={styles["button-ghost"]}
+              onClick={() => setCarryForwardConfirmationOpen(false)}
+              disabled={carryForwardSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className={styles["button-primary"]}
+              onClick={confirmCarryForward}
+              loading={carryForwardSaving}
+            >
+              Confirm and add
             </Button>
           </div>
         </Modal>

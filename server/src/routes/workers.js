@@ -2,6 +2,7 @@ import { Router } from "express";
 import Worker from "../models/Worker.js";
 import Payment from "../models/Payment.js";
 import Attendance from "../models/Attendance.js";
+import SalaryCarryForwardDecision from "../models/SalaryCarryForwardDecision.js";
 import CompanyClient from "../models/CompanyClient.js";
 import CompanyWorkerRate from "../models/CompanyWorkerRate.js";
 import {
@@ -19,6 +20,7 @@ import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import { parseWorkerSearch } from "../utils/workerSearch.js";
 import { appendWorkerStatusTransition } from "../utils/workerStatusHistory.js";
+import { calculateSalaryAmountDue } from "../utils/salarySummary.js";
 import {
   applyWorkerStatusFilter,
   getWorkerLabourStatus,
@@ -701,7 +703,10 @@ router.delete(
         "This worker is not deleted and cannot be permanently removed.",
       );
     }
-    await Worker.findByIdAndDelete(req.params.id);
+    await Promise.all([
+      Worker.findByIdAndDelete(req.params.id),
+      SalaryCarryForwardDecision.deleteMany({ worker: worker._id }),
+    ]);
     await recordAdminActivity(
       req,
       "DELETE",
@@ -797,7 +802,13 @@ router.get(
     const monthStart = parseLocalDateOnly(`${month}-01`);
     const nextMonthStart = new Date(year, monthNumber, 1);
     const workerId = worker._id;
-    const [previousAttendance, monthAttendance, previousPayments, monthPayments] =
+    const [
+      previousAttendance,
+      monthAttendance,
+      previousPayments,
+      monthPayments,
+      carryForwardDecision,
+    ] =
       await Promise.all([
         Attendance.aggregate([
           { $match: { worker: workerId, date: { $lt: monthStart } } },
@@ -832,6 +843,7 @@ router.get(
           },
           { $group: { _id: "$flow", amount: { $sum: "$amount" } } },
         ]),
+        SalaryCarryForwardDecision.findOne({ worker: workerId, month }).lean(),
       ]);
     const netPayments = (flows) =>
       flows.reduce(
@@ -850,14 +862,67 @@ router.get(
       overtimePayable: 0,
     };
     const paidThisMonth = netPayments(monthPayments);
+    const confirmedCarryForward = Boolean(carryForwardDecision);
+    const currentMonthDue =
+      Number(summary.totalPayable || 0) - paidThisMonth;
 
     res.json({
       month,
       ...summary,
       previousDue,
       paidThisMonth,
-      amountDue: previousDue + Number(summary.totalPayable || 0) - paidThisMonth,
+      carryForwardConfirmed: confirmedCarryForward,
+      currentMonthDue,
+      amountDue: calculateSalaryAmountDue({
+        currentMonthPayable: Number(summary.totalPayable || 0),
+        paidThisMonth,
+        previousDue,
+        carryForwardConfirmed: confirmedCarryForward,
+      }),
     });
+  }),
+);
+
+router.post(
+  "/:id/salary-summary/carry-forward",
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findById(req.params.id).select("_id");
+    if (!worker) throw new ApiError(404, "Worker not found.");
+    const month = String(req.body.month || "");
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new ApiError(400, "Salary month must use YYYY-MM format.");
+    }
+
+    await SalaryCarryForwardDecision.findOneAndUpdate(
+      { worker: worker._id, month },
+      {
+        $set: {
+          confirmedBy: req.user.id,
+          confirmedAt: new Date(),
+        },
+        $setOnInsert: { worker: worker._id, month },
+      },
+      { upsert: true, new: true, runValidators: true },
+    );
+    res.json({ carryForwardConfirmed: true });
+  }),
+);
+
+router.delete(
+  "/:id/salary-summary/carry-forward",
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findById(req.params.id).select("_id");
+    if (!worker) throw new ApiError(404, "Worker not found.");
+    const month = String(req.query.month || "");
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new ApiError(400, "Salary month must use YYYY-MM format.");
+    }
+
+    await SalaryCarryForwardDecision.deleteOne({
+      worker: worker._id,
+      month,
+    });
+    res.json({ carryForwardConfirmed: false });
   }),
 );
 

@@ -1540,9 +1540,39 @@
   border-radius: 10px;
   background: linear-gradient(135deg, #fff5f5 0%, #fff9f9 100%);
 }
+.khata-salary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.khata-salary-header .field {
+  width: min(170px, 42%);
+  flex: 0 0 auto;
+}
+.khata-salary-header .field > span {
+  font-size: 9px;
+}
+.khata-salary-header input {
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 11px;
+}
 .khata-salary-copy {
   display: grid;
   gap: 3px;
+}
+.khata-salary-carry-forward {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.khata-salary-carry-forward .button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 10px;
 }
 .khata-salary-label {
   display: inline-block;
@@ -1591,10 +1621,16 @@
 }
 .khata-entry-filters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
   align-items: end;
   gap: 8px;
   margin-bottom: 12px;
+}
+.khata-entry-filters > .button {
+  min-height: 33px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  font-size: 10px;
 }
 .khata-entry-filters .field {
   min-width: 0;

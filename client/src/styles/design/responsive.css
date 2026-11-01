@@ -239,6 +239,12 @@
   .khata-entry-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .khata-entry-filters > .button {
+    grid-column: 1 / -1;
+  }
+  .khata-salary-header {
+    align-items: center;
+  }
   .khata-detail-actions {
     justify-content: flex-start;
   }

@@ -63,7 +63,7 @@ test("salary breakdown is unavailable until complete attendance totals load", ()
   );
 });
 
-test("salary breakdown still includes carried dues when there is no current-month attendance", () => {
+test("salary breakdown preserves an accepted prior balance without current-month attendance", () => {
   const breakdown = createSalaryBreakdown({
     month: "2026-11",
     workUnits: 0,
@@ -74,8 +74,38 @@ test("salary breakdown still includes carried dues when there is no current-mont
     previousDue: 900,
     paidThisMonth: 100,
     amountDue: 800,
+    carryForwardConfirmed: true,
   });
 
   assert.equal(breakdown.formula, "No attendance payable this month");
   assert.equal(breakdown.amountDue, 800);
+  assert.equal(breakdown.carryForwardConfirmed, true);
+});
+
+test("previous due is excluded until carry-forward is confirmed", () => {
+  const summary = {
+    month: "2026-11",
+    workUnits: 1,
+    dailyPayable: 1000,
+    overtimeHours: 0,
+    overtimePayable: 0,
+    totalPayable: 1000,
+    previousDue: 500,
+    paidThisMonth: 200,
+    currentMonthDue: 800,
+    amountDue: 800,
+    carryForwardConfirmed: false,
+  };
+  const breakdown = createSalaryBreakdown(summary);
+
+  assert.equal(breakdown.amountDue, 800);
+  assert.equal(breakdown.carryForwardConfirmed, false);
+
+  const confirmed = createSalaryBreakdown({
+    ...summary,
+    amountDue: 1300,
+    carryForwardConfirmed: true,
+  });
+  assert.equal(confirmed.amountDue, 1300);
+  assert.equal(confirmed.carryForwardConfirmed, true);
 });

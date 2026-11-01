@@ -37,11 +37,13 @@ export function createSalaryBreakdown(summary) {
   const previousDue = Number(summary.previousDue);
   const paidThisMonth = Number(summary.paidThisMonth);
   const amountDue = Number(summary.amountDue);
+  const carryForwardConfirmed = Boolean(summary.carryForwardConfirmed);
   if (
     total <= 0 &&
     previousDue === 0 &&
     paidThisMonth === 0 &&
-    amountDue === 0
+    amountDue === 0 &&
+    !carryForwardConfirmed
   ) {
     return null;
   }
@@ -69,6 +71,7 @@ export function createSalaryBreakdown(summary) {
     previousDue,
     paidThisMonth,
     amountDue,
+    carryForwardConfirmed,
     monthLabel: summary.month
       ? new Intl.DateTimeFormat("en-IN", {
           month: "long",
