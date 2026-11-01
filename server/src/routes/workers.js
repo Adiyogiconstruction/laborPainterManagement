@@ -86,6 +86,50 @@ const normalizeWorkerFields = (data) => {
   return data;
 };
 
+const attendanceWorkUnitsExpression = {
+  $ifNull: [
+    "$workUnits",
+    {
+      $switch: {
+        branches: [
+          { case: { $eq: ["$status", "PRESENT"] }, then: 1 },
+          { case: { $eq: ["$status", "DOUBLE_PRESENT"] }, then: 2 },
+          { case: { $eq: ["$status", "TRIPLE_PRESENT"] }, then: 3 },
+          { case: { $eq: ["$status", "HALF_DAY"] }, then: 0.5 },
+        ],
+        default: 0,
+      },
+    },
+  ],
+};
+
+const attendancePaySummaryStages = [
+  {
+    $group: {
+      _id: null,
+      totalPayable: { $sum: { $ifNull: ["$payableAmount", 0] } },
+      workUnits: { $sum: attendanceWorkUnitsExpression },
+      dailyPayable: {
+        $sum: {
+          $multiply: [
+            { $ifNull: ["$dailyRate", 0] },
+            attendanceWorkUnitsExpression,
+          ],
+        },
+      },
+      overtimeHours: { $sum: { $ifNull: ["$overtimeHours", 0] } },
+      overtimePayable: {
+        $sum: {
+          $multiply: [
+            { $ifNull: ["$overtimeHours", 0] },
+            { $ifNull: ["$overtimeRate", 0] },
+          ],
+        },
+      },
+    },
+  },
+];
+
 const parseRateApplicableFrom = (value, fallback) => {
   const dateValue = value || fallback;
   if (typeof dateValue !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -739,6 +783,85 @@ router.get(
 );
 
 router.get(
+  "/:id/salary-summary",
+  asyncHandler(async (req, res) => {
+    const worker = await Worker.findById(req.params.id);
+    if (!worker) throw new ApiError(404, "Worker not found.");
+
+    const month = String(req.query.month || "");
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new ApiError(400, "Salary month must use YYYY-MM format.");
+    }
+
+    const [year, monthNumber] = month.split("-").map(Number);
+    const monthStart = parseLocalDateOnly(`${month}-01`);
+    const nextMonthStart = new Date(year, monthNumber, 1);
+    const workerId = worker._id;
+    const [previousAttendance, monthAttendance, previousPayments, monthPayments] =
+      await Promise.all([
+        Attendance.aggregate([
+          { $match: { worker: workerId, date: { $lt: monthStart } } },
+          ...attendancePaySummaryStages,
+        ]),
+        Attendance.aggregate([
+          {
+            $match: {
+              worker: workerId,
+              date: { $gte: monthStart, $lt: nextMonthStart },
+            },
+          },
+          ...attendancePaySummaryStages,
+        ]),
+        Payment.aggregate([
+          {
+            $match: {
+              worker: workerId,
+              deletedAt: null,
+              paidOn: { $lt: monthStart },
+            },
+          },
+          { $group: { _id: "$flow", amount: { $sum: "$amount" } } },
+        ]),
+        Payment.aggregate([
+          {
+            $match: {
+              worker: workerId,
+              deletedAt: null,
+              paidOn: { $gte: monthStart, $lt: nextMonthStart },
+            },
+          },
+          { $group: { _id: "$flow", amount: { $sum: "$amount" } } },
+        ]),
+      ]);
+    const netPayments = (flows) =>
+      flows.reduce(
+        (total, flow) =>
+          total + (flow._id === "INFLOW" ? -1 : 1) * Number(flow.amount || 0),
+        0,
+      );
+    const previousDue =
+      Number(previousAttendance[0]?.totalPayable || 0) -
+      netPayments(previousPayments);
+    const summary = monthAttendance[0] || {
+      totalPayable: 0,
+      workUnits: 0,
+      dailyPayable: 0,
+      overtimeHours: 0,
+      overtimePayable: 0,
+    };
+    const paidThisMonth = netPayments(monthPayments);
+
+    res.json({
+      month,
+      ...summary,
+      previousDue,
+      paidThisMonth,
+      amountDue: previousDue + Number(summary.totalPayable || 0) - paidThisMonth,
+    });
+  }),
+);
+
+router.get(
   "/:id/history",
   asyncHandler(async (req, res) => {
     const worker = await Worker.findById(req.params.id);
@@ -795,6 +918,24 @@ router.get(
             $group: {
               _id: null,
               totalPayable: { $sum: "$payableAmount" },
+              workUnits: { $sum: attendanceWorkUnitsExpression },
+              dailyPayable: {
+                $sum: {
+                  $multiply: [
+                    { $ifNull: ["$dailyRate", 0] },
+                    attendanceWorkUnitsExpression,
+                  ],
+                },
+              },
+              overtimeHours: { $sum: { $ifNull: ["$overtimeHours", 0] } },
+              overtimePayable: {
+                $sum: {
+                  $multiply: [
+                    { $ifNull: ["$overtimeHours", 0] },
+                    { $ifNull: ["$overtimeRate", 0] },
+                  ],
+                },
+              },
               days: { $sum: 1 },
               presentDays: {
                 $sum: {

@@ -18,10 +18,12 @@ import { ErrorNote, errorMessage } from "./shared.jsx";
 import {
   Empty,
   Field,
+  Modal,
   PageHeader,
   Panel,
   SearchBox,
   Status,
+  StickyHorizontalScrollbar,
 } from "../components/ui/index.jsx";
 import styles from "../styles/design.module.css";
 import { buildDirtyAttendanceEntries } from "../utils/attendanceChanges.js";
@@ -73,6 +75,7 @@ function MonthlyAttendance() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [attendancePdfChoiceOpen, setAttendancePdfChoiceOpen] = useState(false);
   const [error, setError] = useState("");
   const [companyProfile, setCompanyProfile] = useState(null);
   const containerRef = useRef(null);
@@ -539,11 +542,29 @@ function MonthlyAttendance() {
     }
   };
 
-  const downloadAttendancePdf = async () => {
+  const hasAttendanceInPeriod = (worker) =>
+    Array.from({ length: data.days }, (_, dayIndex) => dayIndex + 1).some(
+      (day) => {
+        const dateKey = `${month}-${String(day).padStart(2, "0")}`;
+        return (
+          dateKey >= periodStart &&
+          dateKey <= periodEnd &&
+          codeFor(cellFor(worker._id, day)) !== ""
+        );
+      },
+    );
+  const matchingWorkers = data.workers.filter(workerMatches);
+  const markedWorkersCount = matchingWorkers.filter(
+    hasAttendanceInPeriod,
+  ).length;
+  const downloadAttendancePdf = async (markedOnly) => {
+    setAttendancePdfChoiceOpen(false);
     setGeneratingPdf(true);
     setError("");
     try {
-      const selectedWorkers = data.workers.filter(workerMatches);
+      const selectedWorkers = matchingWorkers.filter(
+        (worker) => !markedOnly || hasAttendanceInPeriod(worker),
+      );
       const pdfWorkers = selectedWorkers.map((worker, index) => {
         let normalDays = 0;
         let overtimeHours = 0;
@@ -617,9 +638,9 @@ function MonthlyAttendance() {
             </button>
             <button
               className={`${styles["button-secondary"]}`}
-              onClick={downloadAttendancePdf}
+              onClick={() => setAttendancePdfChoiceOpen(true)}
               disabled={
-                generatingPdf || loading || !data.workers.filter(workerMatches).length
+                generatingPdf || loading || !matchingWorkers.length
               }
               type="button"
             >
@@ -991,11 +1012,53 @@ function MonthlyAttendance() {
           </div>
         )}
       </Panel>
+      <StickyHorizontalScrollbar targetRef={containerRef} />
+      {attendancePdfChoiceOpen && (
+        <Modal
+          title="Choose attendance for PDF"
+          onClose={() => setAttendancePdfChoiceOpen(false)}
+        >
+          <p>
+            Choose whether to include every labour matching the current filters
+            or only labour with attendance marked between {periodStart} and{" "}
+            {periodEnd}.
+          </p>
+          <p>
+            {matchingWorkers.length} matching labour · {markedWorkersCount} with
+            marked attendance
+          </p>
+          <div className={`${styles["modal-actions"]}`}>
+            <button
+              className={`${styles["button-ghost"]}`}
+              onClick={() => setAttendancePdfChoiceOpen(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className={`${styles["button-secondary"]}`}
+              onClick={() => downloadAttendancePdf(false)}
+              type="button"
+            >
+              All labour
+            </button>
+            <button
+              className={`${styles["button-primary"]}`}
+              onClick={() => downloadAttendancePdf(true)}
+              disabled={!markedWorkersCount}
+              type="button"
+            >
+              Marked attendance
+            </button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
 
 export function AttendancePage() {
+  const dailyAttendanceTableRef = useRef(null);
   const [date, setDate] = useState(defaultDate());
   const [workers, setWorkers] = useState([]);
   const [summary, setSummary] = useState({
@@ -1292,7 +1355,10 @@ export function AttendancePage() {
 
         <ErrorNote error={error} />
 
-        <div className={`${styles["table-wrap"]}`}>
+        <div
+          ref={dailyAttendanceTableRef}
+          className={`${styles["table-wrap"]}`}
+        >
           <table>
             <thead>
               <tr>
@@ -1417,6 +1483,7 @@ export function AttendancePage() {
           </table>
         </div>
       </Panel>
+      <StickyHorizontalScrollbar targetRef={dailyAttendanceTableRef} />
     </>
   );
 }

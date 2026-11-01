@@ -7,6 +7,7 @@ const marginMm = 5;
 const dayColumnWidthMm = 4.54;
 const headerTopMm = 7;
 const headerHeightMm = 14;
+const minimumFixedColumnWidthsMm = [6, 20, 12, 12, 18, 12];
 
 export const attendancePdfLayout = Object.freeze({
   pageWidthMm,
@@ -29,6 +30,82 @@ const columnWidthsForDays = (dayCount) => [
   ...Array(dayCount).fill(dayColumnWidthMm),
   ...attendancePdfLayout.fixedColumnWidthsMm.slice(4),
 ];
+
+const columnWidthsForAttendance = (dayCount, workers, doc) => {
+  const widths = columnWidthsForDays(dayCount);
+  const firstDayColumn = 4;
+  const fixedColumns = [
+    0,
+    1,
+    2,
+    3,
+    dayCount + firstDayColumn,
+    dayCount + firstDayColumn + 1,
+  ];
+  const availableAdjustment = fixedColumns.reduce(
+    (total, columnIndex, index) =>
+      total +
+      widths[columnIndex] -
+      minimumFixedColumnWidthsMm[index],
+    0,
+  );
+  const dayAdjustments = Array.from({ length: dayCount }, (_, dayIndex) => {
+    const widestCode = workers.reduce((widest, worker) => {
+      const code = worker.attendance[dayIndex];
+      if (!code) return widest;
+      return Math.max(widest, doc.getTextWidth(code) + 0.44);
+    }, dayColumnWidthMm);
+    return Math.max(0, widestCode - dayColumnWidthMm);
+  });
+  const requestedAdjustment = dayAdjustments.reduce(
+    (total, adjustment) => total + adjustment,
+    0,
+  );
+  const adjustmentScale =
+    requestedAdjustment > availableAdjustment
+      ? availableAdjustment / requestedAdjustment
+      : 1;
+  let reclaimedWidth = 0;
+  for (const [dayIndex, adjustment] of dayAdjustments.entries()) {
+    const scaledAdjustment = adjustment * adjustmentScale;
+    widths[firstDayColumn + dayIndex] += scaledAdjustment;
+    reclaimedWidth += scaledAdjustment;
+  }
+
+  const totalReducibleWidth = fixedColumns.reduce(
+    (total, columnIndex, index) =>
+      total +
+      widths[columnIndex] -
+      minimumFixedColumnWidthsMm[index],
+    0,
+  );
+  for (const [index, columnIndex] of fixedColumns.entries()) {
+    const reducibleWidth =
+      widths[columnIndex] - minimumFixedColumnWidthsMm[index];
+    widths[columnIndex] -=
+      reclaimedWidth * (reducibleWidth / totalReducibleWidth);
+  }
+  return widths;
+};
+
+const compareAttendanceGroup = (firstValue, secondValue) =>
+  String(firstValue || "")
+    .trim()
+    .localeCompare(String(secondValue || "").trim(), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+const sortWorkersByCompanyAndLocation = (workers) =>
+  workers
+    .map((worker, originalIndex) => ({ worker, originalIndex }))
+    .sort(
+      (first, second) =>
+        compareAttendanceGroup(first.worker.company, second.worker.company) ||
+        compareAttendanceGroup(first.worker.location, second.worker.location) ||
+        first.originalIndex - second.originalIndex,
+    )
+    .map(({ worker }) => worker);
 
 export function validateAttendancePdfData({ month, workers }) {
   const dayCount = attendanceDaysInMonth(month);
@@ -114,8 +191,8 @@ export async function createAttendancePdf({
     tableWidthMm,
     printableWidthMm,
     dayCount,
-    columnWidthsMm,
   } = validateAttendancePdfData({ month, workers });
+  const orderedWorkers = sortWorkersByCompanyAndLocation(workers);
   const logoData = await resolveLogo(profileLogoUrl, fallbackLogoUrl);
   const doc = new jsPDF({
     orientation: "landscape",
@@ -123,6 +200,13 @@ export async function createAttendancePdf({
     format: "a4",
     compress: true,
   });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(4.2);
+  const adjustedColumnWidthsMm = columnWidthsForAttendance(
+    dayCount,
+    orderedWorkers,
+    doc,
+  );
 
   if (
     Math.abs(doc.internal.pageSize.getWidth() - pageWidthMm) > 0.1 ||
@@ -142,11 +226,11 @@ export async function createAttendancePdf({
     "TOTAL (D + H)",
     "TOTAL DAYS",
   ];
-  if (headers.length !== columnWidthsMm.length) {
+  if (headers.length !== adjustedColumnWidthsMm.length) {
     throw new Error(`Attendance PDF must contain ${dayCount} day columns and both totals.`);
   }
-  const rows = workers.map((worker) => [
-    String(worker.serialNumber),
+  const rows = orderedWorkers.map((worker, index) => [
+    String(index + 1),
     worker.workerName,
     worker.company || "-",
     worker.location || "-",
@@ -154,7 +238,7 @@ export async function createAttendancePdf({
     worker.totalDH,
     worker.totalDays,
   ]);
-  const grandTotal = workers.reduce(
+  const grandTotal = orderedWorkers.reduce(
     (total, worker) => total + Number(worker.totalDaysValue || 0),
     0,
   );
@@ -177,7 +261,7 @@ export async function createAttendancePdf({
     },
   ]);
 
-  const widths = columnWidthsMm;
+  const widths = adjustedColumnWidthsMm;
   const firstDayColumn = 4;
   const lastDayColumn = firstDayColumn + dayCount - 1;
   const firstTotalColumn = lastDayColumn + 1;
@@ -201,7 +285,7 @@ export async function createAttendancePdf({
       fontSize: 4.2,
       cellPadding: 0.22,
       minCellHeight: 4.7,
-      overflow: "ellipsize",
+      overflow: "linebreak",
       lineColor: [90, 90, 90],
       lineWidth: 0.12,
       textColor: [25, 25, 25],
@@ -219,31 +303,11 @@ export async function createAttendancePdf({
         index,
         {
           cellWidth,
-          halign: index === 1 || index === 2 || index === 3 ? "left" : "center",
+          halign: "center",
         },
       ]),
     ),
     didParseCell({ section, column, cell }) {
-      if (
-        section === "body" &&
-        column.index >= 1 &&
-        column.index < headers.length - 1 &&
-        typeof cell.raw === "string" &&
-        cell.raw
-      ) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(4.2);
-        const availableWidth = widths[column.index] - 0.5;
-        const textWidth = doc.getTextWidth(cell.raw);
-        if (textWidth > availableWidth) {
-          cell.styles.fontSize = Math.max(
-            column.index >= firstDayColumn && column.index <= lastDayColumn
-              ? 2.8
-              : 3.4,
-            4.2 * (availableWidth / textWidth),
-          );
-        }
-      }
       if (
         section === "body" &&
         column.index >= firstDayColumn &&

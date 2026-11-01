@@ -1,5 +1,5 @@
 import styles from "../styles/design.module.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Trash2,
   UserRoundCheck,
+  UserRound,
   UserRoundX,
   UserRoundPlus,
   UsersRound,
@@ -42,6 +43,7 @@ import {
   PageHeader,
   Panel,
   SearchBox,
+  StickyHorizontalScrollbar,
   Status,
 } from "../components/ui/index.jsx";
 import {
@@ -84,6 +86,30 @@ const imageUrl = (worker, urlField, legacyPathField) => {
   const value = worker[urlField] || worker[legacyPathField];
   return value?.startsWith("http") ? value : `${apiOrigin}${value || ""}`;
 };
+
+function WorkerPhotoAvatar({ worker, onClick }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const photo = worker.photoUrl || worker.photoPath;
+
+  return (
+    <button
+      type="button"
+      className={styles["worker-photo-trigger"]}
+      onClick={onClick}
+      aria-label={`View ${worker.name}'s photo`}
+    >
+      {photo && !imageFailed ? (
+        <img
+          src={imageUrl(worker, "photoUrl", "photoPath")}
+          alt=""
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <UserRound aria-hidden="true" />
+      )}
+    </button>
+  );
+}
 
 const exportColumns = [
   ["Name", "name"],
@@ -1222,6 +1248,9 @@ export function WorkersPage() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [permanentlyDeleting, setPermanentlyDeleting] = useState();
   const [history, setHistory] = useState();
+  const [photoPreviewWorker, setPhotoPreviewWorker] = useState(null);
+  const [photoPreviewFailed, setPhotoPreviewFailed] = useState(false);
+  const workforceTableRef = useRef(null);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [pdfColumnPickerOpen, setPdfColumnPickerOpen] = useState(false);
@@ -1681,7 +1710,10 @@ export function WorkersPage() {
         className={styles["workforce-list-panel"]}
       >
         <ErrorNote error={error} />
-        <div className={`${styles["table-wrap"]}`}>
+        <div
+          ref={workforceTableRef}
+          className={`${styles["table-wrap"]}`}
+        >
           <table>
             <thead>
               <tr>
@@ -1720,17 +1752,13 @@ export function WorkersPage() {
                   <td>{worker.companyName || "—"}</td>
                   <td>{worker.teamName || "—"}</td>
                   <td>
-                    {worker.photoPath ? (
-                      <img
-                        src={imageUrl(worker, "photoUrl", "photoPath")}
-                        alt={`${worker.name} profile`}
-                        width="42"
-                        height="42"
-                        style={{ objectFit: "cover", borderRadius: "50%" }}
-                      />
-                    ) : (
-                      "—"
-                    )}
+                    <WorkerPhotoAvatar
+                      worker={worker}
+                      onClick={() => {
+                        setPhotoPreviewFailed(false);
+                        setPhotoPreviewWorker(worker);
+                      }}
+                    />
                   </td>
                   <td>{worker.phone || "—"}</td>
                   <td>{worker.skill || "—"}</td>
@@ -1886,6 +1914,38 @@ export function WorkersPage() {
       )}{" "}
       {history && (
         <WorkerHistory worker={history} onClose={() => setHistory(null)} />
+      )}
+      <StickyHorizontalScrollbar targetRef={workforceTableRef} />
+      {photoPreviewWorker && (
+        <Modal
+          title="Worker photo"
+          onClose={() => setPhotoPreviewWorker(null)}
+          className={styles["worker-photo-modal"]}
+        >
+          <div className={styles["worker-photo-preview"]}>
+            {photoPreviewWorker.photoUrl || photoPreviewWorker.photoPath
+              ? !photoPreviewFailed && (
+                  <img
+                    src={imageUrl(
+                      photoPreviewWorker,
+                      "photoUrl",
+                      "photoPath",
+                    )}
+                    alt={`${photoPreviewWorker.name} profile`}
+                    onError={() => setPhotoPreviewFailed(true)}
+                  />
+                )
+              : null}
+            {(!(photoPreviewWorker.photoUrl || photoPreviewWorker.photoPath) ||
+              photoPreviewFailed) && (
+              <UserRound
+                className={styles["worker-photo-placeholder"]}
+                aria-hidden="true"
+              />
+            )}
+            <strong>{photoPreviewWorker.name}</strong>
+          </div>
+        </Modal>
       )}
       {deleting && (
         <DeleteConfirm

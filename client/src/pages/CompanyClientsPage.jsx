@@ -100,7 +100,13 @@ const workerIdsFilter = (selection) =>
 
 const blankAssignment = () => {
   const today = localDateInput(new Date());
-  return { labourCount: "", zone: "", startDate: today, endDate: "", ongoing: true };
+  return {
+    workerIds: [],
+    zone: "",
+    startDate: today,
+    endDate: "",
+    ongoing: true,
+  };
 };
 
 const currentMonthRange = () => {
@@ -211,6 +217,17 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   const [assignmentFormOpen, setAssignmentFormOpen] = useState(false);
   const [assignmentPeriod, setAssignmentPeriod] = useState("MONTH");
   const [assignmentForm, setAssignmentForm] = useState(blankAssignment);
+  const [assignmentWorkers, setAssignmentWorkers] = useState([]);
+  const [selectedAssignmentWorkers, setSelectedAssignmentWorkers] = useState([]);
+  const [assignmentWorkerPage, setAssignmentWorkerPage] = useState(1);
+  const [assignmentWorkerPageSize, setAssignmentWorkerPageSize] = useState(5);
+  const [assignmentWorkerSearch, setAssignmentWorkerSearch] = useState("");
+  const [assignmentWorkerPagination, setAssignmentWorkerPagination] = useState({
+    page: 1,
+    pages: 1,
+    total: 0,
+  });
+  const [assignmentWorkersLoading, setAssignmentWorkersLoading] = useState(false);
   const [editingAssignmentId, setEditingAssignmentId] = useState("");
   const [deletingAssignment, setDeletingAssignment] = useState(null);
   const [assignments, setAssignments] = useState([]);
@@ -542,6 +559,60 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     };
   }, [trackingCompanyId, assignmentPeriod]);
 
+  useEffect(() => {
+    if (
+      !trackingCompanyId ||
+      !canEdit ||
+      !assignmentFormOpen ||
+      !assignmentForm.zone
+    ) {
+      setAssignmentWorkers([]);
+      setAssignmentWorkersLoading(false);
+      setAssignmentWorkerPagination({ page: 1, pages: 1, total: 0 });
+      return undefined;
+    }
+
+    let current = true;
+    setAssignmentError("");
+    setAssignmentWorkers([]);
+    setAssignmentWorkersLoading(true);
+    request(
+      api.get(`/companies/${trackingCompanyId}/labour-options`, {
+        params: {
+          zone: assignmentForm.zone,
+          date: assignmentForm.startDate,
+          page: assignmentWorkerPage,
+          pageSize: assignmentWorkerPageSize,
+          search: assignmentWorkerSearch,
+        },
+      }),
+    )
+      .then((result) => {
+        if (!current) return;
+        setAssignmentWorkers(result.workers);
+        setAssignmentWorkerPagination(result.pagination);
+      })
+      .catch((err) => {
+        if (current) setAssignmentError(errorMessage(err));
+      })
+      .finally(() => {
+        if (current) setAssignmentWorkersLoading(false);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [
+    trackingCompanyId,
+    canEdit,
+    assignmentFormOpen,
+    assignmentForm.zone,
+    assignmentForm.startDate,
+    assignmentWorkerPage,
+    assignmentWorkerPageSize,
+    assignmentWorkerSearch,
+  ]);
+
   const refreshAssignments = async () => {
     const range = getPeriodRange(assignmentPeriod);
     const result = await request(
@@ -655,6 +726,9 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     setAssignmentSaving(true);
     setAssignmentError("");
     try {
+      if (!assignmentForm.zone || !assignmentForm.workerIds.length) {
+        throw new Error("Choose a location and select at least one labour.");
+      }
       await request(
         editingAssignmentId
           ? api.patch(
@@ -667,6 +741,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
             ),
       );
       setAssignmentForm(blankAssignment());
+      setSelectedAssignmentWorkers([]);
       setEditingAssignmentId("");
       setAssignmentFormOpen(false);
       await refreshAssignments();
@@ -714,8 +789,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   const editAssignment = (assignment) => {
     setAssignmentError("");
     setEditingAssignmentId(assignment._id);
+    setSelectedAssignmentWorkers(assignment.workers || []);
     setAssignmentForm({
-      labourCount: String(assignment.labourCount),
+      workerIds: (assignment.workers || []).map((worker) =>
+        String(worker._id),
+      ),
       zone: assignment.zone || "",
       startDate: new Date(assignment.startDate).toISOString().slice(0, 10),
       endDate: assignment.endDate
@@ -896,8 +974,8 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       {companyListPanel}
       {isOwner && (
         <Panel
-          title="Manual labour assignment summary"
-          detail={`${periodLabel(profitPeriod)} · ${rangeLabel(profitRange)} · Contract/headcount margin from Track labour assignments; attendance is not used, so it can include assigned labour-days even when attendance is absent or not entered.`}
+          title="Labour assignment profit summary"
+          detail={`${periodLabel(profitPeriod)} · ${rangeLabel(profitRange)} · New labour records use saved attendance; absent and unmarked days add no profit. Older headcount-only records keep their original calculation until edited with labour selections.`}
           className={styles["company-profit-panel"]}
         >
           {profitError ? (
@@ -1077,7 +1155,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               Labour-wise Profit Sheet
             </span>
           }
-          detail="Company billing and labour salary are calculated from saved attendance and the effective rates for each work date. Expenses are excluded."
+          detail="Profit uses each selected labourer's saved attendance, billing and payable for the selected dates. Absent and unmarked days add no profit; older headcount-only records keep their original calculation until edited with labour selections. Expenses are excluded."
           className={styles["company-detail-panel"]}
         >
           {detailError && <ErrorNote error={detailError} />}
@@ -1124,7 +1202,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                 }
               />
             </Field>
-            <Field label="Zone">
+            <Field label="Company location">
               <select
                 value={detailZone}
                 onChange={(event) => {
@@ -1624,6 +1702,9 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                   onClick={() => {
                     setAssignmentError("");
                     setAssignmentForm(blankAssignment());
+                    setSelectedAssignmentWorkers([]);
+                    setAssignmentWorkerPage(1);
+                    setAssignmentWorkerSearch("");
                     setEditingAssignmentId("");
                     setAssignmentFormOpen(true);
                   }}
@@ -1637,54 +1718,153 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                 className={`${styles["form-grid"]} ${styles["company-assignment-form"]}`}
                 onSubmit={saveAssignment}
               >
-                <Field label="Number of labourers">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    value={assignmentForm.labourCount}
-                    onChange={(event) =>
-                      setAssignmentForm((current) => ({
-                        ...current,
-                        labourCount: event.target.value,
-                      }))
-                    }
-                    placeholder="e.g. 8"
-                  />
-                </Field>
                 <Field label="Zone">
                   {trackingCompany.zones?.length ? (
                     <select
                       required
                       value={assignmentForm.zone}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setAssignmentForm((current) => ({
                           ...current,
                           zone: event.target.value,
-                        }))
-                      }
+                          workerIds: [],
+                        }));
+                        setSelectedAssignmentWorkers([]);
+                        setAssignmentWorkerPage(1);
+                      }}
                     >
-                      <option value="">Select zone</option>
+                      <option value="">Select location</option>
                       {trackingCompany.zones.map((zone) => (
                         <option value={zone} key={zone}>{zone}</option>
                       ))}
                     </select>
                   ) : (
-                    <input
-                      required
-                      maxLength={100}
-                      value={assignmentForm.zone}
-                      onChange={(event) =>
-                        setAssignmentForm((current) => ({
-                          ...current,
-                          zone: event.target.value,
-                        }))
-                      }
-                      placeholder="e.g. Chennai"
-                    />
+                    <span>Configure company locations before tracking labour.</span>
                   )}
                 </Field>
+                <div className={styles["company-assignment-worker-picker"]}>
+                  <div className={styles["company-assignment-worker-heading"]}>
+                    <strong>
+                      Labour at {assignmentForm.zone || "selected location"}
+                    </strong>
+                    <span>
+                      {assignmentForm.zone
+                        ? `${assignmentWorkerPagination.total} available · ${assignmentForm.workerIds.length} selected`
+                        : "Choose a location to see labour"}
+                    </span>
+                  </div>
+                  {assignmentForm.zone && (
+                    <>
+                      <input
+                        type="search"
+                        value={assignmentWorkerSearch}
+                        onChange={(event) => {
+                          setAssignmentWorkerSearch(event.target.value);
+                          setAssignmentWorkerPage(1);
+                        }}
+                        placeholder="Search labour by name"
+                        aria-label="Search labour at selected location"
+                      />
+                      <div className={styles["company-assignment-worker-list"]}>
+                        {assignmentWorkersLoading ? (
+                          <small>Loading labour…</small>
+                        ) : assignmentWorkers.length ? (
+                          assignmentWorkers.map((worker) => {
+                            const workerId = String(worker._id);
+                            const selected =
+                              assignmentForm.workerIds.includes(workerId);
+                            return (
+                              <label key={workerId}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={(event) => {
+                                    setAssignmentForm((current) => ({
+                                      ...current,
+                                      workerIds: event.target.checked
+                                        ? [...current.workerIds, workerId]
+                                        : current.workerIds.filter(
+                                            (id) => id !== workerId,
+                                          ),
+                                    }));
+                                    setSelectedAssignmentWorkers((current) =>
+                                      event.target.checked
+                                        ? [...current, worker]
+                                        : current.filter(
+                                            (item) =>
+                                              String(item._id) !== workerId,
+                                          ),
+                                    );
+                                  }}
+                                />
+                                <span>{worker.name}</span>
+                                <strong>{money(worker.dailyRate)}/day</strong>
+                              </label>
+                            );
+                          })
+                        ) : (
+                          <small>No active labour found at this location.</small>
+                        )}
+                      </div>
+                      <div className={styles["company-assignment-worker-pagination"]}>
+                        <label>
+                          Show
+                          <select
+                            value={assignmentWorkerPageSize}
+                            onChange={(event) => {
+                              setAssignmentWorkerPageSize(
+                                Number(event.target.value),
+                              );
+                              setAssignmentWorkerPage(1);
+                            }}
+                            aria-label="Labour options per page"
+                          >
+                            <option value={5}>5</option>
+                            <option value={10}>10</option>
+                          </select>
+                          per page
+                        </label>
+                        <span>
+                          {assignmentWorkerPagination.total
+                            ? `${(assignmentWorkerPage - 1) * assignmentWorkerPageSize + 1}–${Math.min(assignmentWorkerPage * assignmentWorkerPageSize, assignmentWorkerPagination.total)} of ${assignmentWorkerPagination.total}`
+                            : "0 labour"}
+                        </span>
+                        <div>
+                          <Button
+                            type="button"
+                            className={styles["button-secondary"]}
+                            disabled={assignmentWorkerPage <= 1}
+                            onClick={() =>
+                              setAssignmentWorkerPage((page) => page - 1)
+                            }
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            type="button"
+                            className={styles["button-secondary"]}
+                            disabled={
+                              assignmentWorkerPage >=
+                              assignmentWorkerPagination.pages
+                            }
+                            onClick={() =>
+                              setAssignmentWorkerPage((page) => page + 1)
+                            }
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {selectedAssignmentWorkers.length > 0 && (
+                    <div className={styles["company-assignment-selected-workers"]}>
+                      {selectedAssignmentWorkers.map((worker) => (
+                        <span key={worker._id}>{worker.name}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <Field label="From date">
                   <input
                     type="date"
@@ -1736,6 +1916,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                       setAssignmentFormOpen(false);
                       setEditingAssignmentId("");
                       setAssignmentForm(blankAssignment());
+                      setSelectedAssignmentWorkers([]);
                     }}
                     disabled={assignmentSaving}
                   >
@@ -1779,7 +1960,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                   >
                     {money(assignmentSummary.profit || 0)}
                   </strong>
-                  <small>Rate difference × labour-days</small>
+                  <small>Attendance billing − actual labour payable</small>
                 </article>
               )}
             </div>
@@ -1790,16 +1971,44 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                 {assignments.map((assignment) => (
                   <article key={assignment._id}>
                     <div>
-                      <strong>{assignment.labourCount} labour</strong>
+                      <strong>
+                        {assignment.labourCount}{" "}
+                        {assignment.labourCount === 1 ? "labour" : "labourers"}
+                      </strong>
                       <small>
                         {date(assignment.startDate)} –{" "}
                         {assignment.endDate ? date(assignment.endDate) : "Ongoing"}
                         {assignment.zone ? ` · ${assignment.zone}` : ""}
                       </small>
+                      {assignment.workers?.length > 0 && (
+                        <small
+                          title={assignment.workers
+                            .map((worker) => worker.name)
+                            .join(", ")}
+                        >
+                          {assignment.workers
+                            .map((worker) => worker.name)
+                            .join(", ")}
+                        </small>
+                      )}
+                      {!assignment.attendanceBased && (
+                        <small>
+                            Legacy count record · edit and select labour for
+                            attendance-based profit
+                        </small>
+                      )}
                     </div>
                     <div>
                       <small>
-                        {assignment.periodDays} {assignment.periodDays === 1 ? "day" : "days"} in selected period
+                        {assignment.periodDays}{" "}
+                        {assignment.periodDays === 1
+                          ? assignment.attendanceBased
+                            ? "attendance day"
+                            : "day"
+                          : assignment.attendanceBased
+                            ? "attendance days"
+                            : "days"}{" "}
+                        in selected period
                       </small>
                       <strong>
                         {Number(assignment.labourDays || 0).toLocaleString("en-IN")} labour-days
@@ -1846,7 +2055,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
             ) : (
               <Empty
                 title="No labour records for this period"
-                detail={canEdit ? "Record the labour count and dates above." : "No labour was recorded for this period."}
+                detail={canEdit ? "Select a location, labour and dates above." : "No labour was recorded for this period."}
               />
             )}
           </div>

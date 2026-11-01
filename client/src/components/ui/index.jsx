@@ -1,6 +1,7 @@
 import styles from "../../styles/design.module.css";
 import { AlertTriangle, X, LoaderCircle, Plus, Search } from "lucide-react";
 import { useState } from "react";
+export { StickyHorizontalScrollbar } from "./StickyHorizontalScrollbar.jsx";
 
 export function PageHeader({ eyebrow, title, detail, action, className = "" }) {
   return (

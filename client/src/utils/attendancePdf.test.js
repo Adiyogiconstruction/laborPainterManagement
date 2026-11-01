@@ -153,18 +153,32 @@ test("PDF template renders validated attendance data with the fixed landscape la
   };
 
   try {
-    const workers = Array.from({ length: 60 }, (_, index) => ({
+    const makeWorker = (workerName, company, location, index) => ({
       serialNumber: index + 1,
-      workerName: `Labour Worker ${index + 1}`,
-      company: "Construction Company",
-      location: "Site North",
+      workerName,
+      company,
+      location,
       attendance: Array.from({ length: 31 }, (_, day) =>
-        day === 0 ? "A" : day === 1 ? "P+P+12" : "P+12",
+        day === 0 ? "A" : day === 1 ? "P+P+P+6" : "P+12",
       ),
       totalDH: "31 + 28",
       totalDays: "34.500",
       totalDaysValue: 34.5,
-    }));
+    });
+    const workers = [
+      makeWorker("Google worker", "Google", "Mumbai", 0),
+      makeWorker("Adobe Mumbai worker", "Adobe", "Mumbai", 1),
+      makeWorker("Zulu worker", "Adobe", "Chennai", 2),
+      makeWorker("Alpha worker", "Adobe", "Chennai", 3),
+      ...Array.from({ length: 56 }, (_, index) =>
+        makeWorker(
+          `Labour Worker ${index + 5}`,
+          "Construction Company",
+          "Site North",
+          index + 4,
+        ),
+      ),
+    ];
     const doc = await createAttendancePdf({
       month: "2026-08",
       team: "TEAM 1",
@@ -189,8 +203,27 @@ test("PDF template renders validated attendance data with the fixed landscape la
       false,
     );
     const firstRow = doc.lastAutoTable.body[0];
+    assert.equal(firstRow.cells["0"].text[0], "1");
+    assert.equal(firstRow.cells["1"].text[0], "Zulu worker");
+    assert.equal(firstRow.cells["2"].text[0], "Adobe");
+    assert.equal(firstRow.cells["3"].text[0], "Chennai");
+    assert.equal(firstRow.cells["1"].styles.halign, "center");
+    assert.equal(firstRow.cells["2"].styles.halign, "center");
+    assert.equal(firstRow.cells["3"].styles.halign, "center");
+    assert.equal(doc.lastAutoTable.body[1].cells["1"].text[0], "Alpha worker");
+    assert.equal(doc.lastAutoTable.body[2].cells["3"].text[0], "Mumbai");
+    assert.equal(doc.lastAutoTable.body[3].cells["2"].text[0], "Construction Company");
+    assert.equal(doc.lastAutoTable.body[59].cells["2"].text[0], "Google");
     assert.equal(firstRow.cells["1"].text.length, 1);
     assert.equal(firstRow.cells["5"].text.length, 1);
+    assert.equal(firstRow.cells["5"].text[0], "P+P+P+6");
+    assert.equal(firstRow.cells["5"].styles.fontSize, 4.2);
+    assert.ok(firstRow.cells["5"].width > attendancePdfLayout.dayColumnWidthMm);
+    assert.equal(firstRow.cells["5"].styles.overflow, "linebreak");
+    assert.ok(
+      firstRow.cells["1"].width <
+        attendancePdfLayout.fixedColumnWidthsMm[1],
+    );
     assert.deepEqual(firstRow.cells["4"].styles.fillColor, [255, 194, 194]);
     assert.deepEqual(firstRow.cells["35"].styles.fillColor, [222, 240, 222]);
     assert.equal(

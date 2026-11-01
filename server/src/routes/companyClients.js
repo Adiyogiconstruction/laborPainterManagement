@@ -10,7 +10,10 @@ import { allowRoles } from "../middleware/auth.js";
 import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
-import { getAssignmentDaysInRange } from "../utils/companyAssignmentUtils.js";
+import {
+  getAssignmentDaysInRange,
+  summarizeAssignmentAttendance,
+} from "../utils/companyAssignmentUtils.js";
 import {
   getWorkerRateHistory,
   upsertWorkerRateHistory,
@@ -238,9 +241,128 @@ const getAssignmentRates = async (company, zone, startDate) => {
   return {
     companyLabourRate:
       zoneRate?.dailyRate ?? Number(company.companyLabourRate || 0),
+    companyOvertimeRate: zoneRate?.overtimeHourlyRate ?? 0,
     originalLabourRate:
       zoneRate?.labourDailyRate ?? Number(company.originalLabourRate || 0),
   };
+};
+
+const validateAssignedWorkers = async (company, zone, workerIds) => {
+  if (!Array.isArray(workerIds) || !workerIds.length) {
+    throw new ApiError(400, "Select at least one labour for this location.");
+  }
+  const ids = workerIds.map((id) => String(id));
+  if (
+    ids.some((id) => !mongoose.isValidObjectId(id)) ||
+    new Set(ids).size !== ids.length
+  ) {
+    throw new ApiError(400, "Selected labour list is invalid.");
+  }
+  const workers = await Worker.find({
+    _id: { $in: ids },
+    companyName: company.name,
+    workZone: zone,
+    type: "LABOUR",
+    active: { $ne: false },
+    deletedAt: null,
+  })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id")
+    .lean();
+  if (workers.length !== ids.length) {
+    throw new ApiError(
+      400,
+      "One or more selected labourers are not active at this company location.",
+    );
+  }
+  return workers.map((worker) => worker._id);
+};
+
+const ensureWorkersAreNotDoubleAssigned = async (
+  company,
+  workerIds,
+  startDate,
+  endDate,
+  excludeAssignmentId,
+) => {
+  if (!workerIds?.length) return;
+  const query = {
+    company: company._id,
+    workerIds: { $in: workerIds },
+    startDate: { $lte: endDate || new Date("9999-12-31T23:59:59.999Z") },
+    $or: [{ endDate: null }, { endDate: { $gte: startDate } }],
+  };
+  if (excludeAssignmentId) query._id = { $ne: excludeAssignmentId };
+  const overlapping = await CompanyLabourAssignment.findOne(query)
+    .select("_id")
+    .lean();
+  if (overlapping) {
+    throw new ApiError(
+      409,
+      "A selected labourer already has a tracking record that overlaps these dates.",
+    );
+  }
+};
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getAssignmentAttendance = async (
+  company,
+  assignments,
+  rangeStart,
+  rangeEnd,
+) => {
+  const workerIds = [
+    ...new Map(
+      assignments
+        .flatMap((assignment) => assignment.workerIds || [])
+        .map((workerId) => [String(workerId), workerId]),
+    ).values(),
+  ];
+  if (!workerIds.length) return { workers: [], attendance: [] };
+  const earliestAssignmentStart = assignments.reduce(
+    (earliest, assignment) =>
+      new Date(assignment.startDate) < earliest
+        ? new Date(assignment.startDate)
+        : earliest,
+    new Date(rangeEnd),
+  );
+  const now = new Date();
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const attendanceStart = new Date(
+    Math.max(rangeStart.getTime(), earliestAssignmentStart.getTime()),
+  );
+  const attendanceEnd = new Date(
+    Math.min(rangeEnd.getTime(), today.getTime()),
+  );
+  const [workers, attendance] = await Promise.all([
+    Worker.find({ _id: { $in: workerIds } })
+      .select("_id name workZone")
+      .lean(),
+    attendanceStart > attendanceEnd
+      ? Promise.resolve([])
+      : Attendance.find({
+          worker: { $in: workerIds },
+          date: { $gte: attendanceStart, $lte: attendanceEnd },
+          $or: [
+            { company: company._id },
+            { companyName: company.name },
+            {
+              company: { $exists: false },
+              companyName: { $exists: false },
+            },
+            {
+              company: null,
+              $or: [{ companyName: "" }, { companyName: { $exists: false } }],
+            },
+          ],
+      })
+        .select("worker company companyName date workUnits overtimeHours dailyRate overtimeRate payableAmount companyDailyRate companyOvertimeRate")
+        .lean(),
+  ]);
+  return { workers, attendance };
 };
 
 const getEffectiveWorkerRate = (history, date, company, worker, zoneRate) => {
@@ -382,7 +504,24 @@ router.get(
       ...(rangeStart <= today
         ? { $or: [{ endDate: { $gte: rangeStart } }, { endDate: null }] }
         : { endDate: { $gte: rangeStart } }),
-    }).select("company companyName zone labourCount startDate endDate companyLabourRate originalLabourRate");
+    }).select("company companyName zone labourCount workerIds startDate endDate companyLabourRate companyOvertimeRate originalLabourRate");
+
+    const attendanceByCompany = new Map(
+      await Promise.all(
+        companies.map(async (company) => {
+          const companyAssignments = assignments.filter(
+            (assignment) => String(assignment.company) === String(company._id),
+          );
+          const { attendance } = await getAssignmentAttendance(
+            company,
+            companyAssignments,
+            rangeStart,
+            rangeEnd,
+          );
+          return [String(company._id), attendance];
+        }),
+      ),
+    );
 
     const summaries = new Map(
       companies.map((company) => [
@@ -392,28 +531,37 @@ router.get(
     );
     const lastSupplies = new Map();
     for (const assignment of assignments) {
-      const days = getAssignmentDaysInRange(
+      const attendanceSummary = summarizeAssignmentAttendance(
         assignment,
+        attendanceByCompany.get(String(assignment.company)) || [],
         rangeStart,
         rangeEnd,
         today,
       );
-      const profit =
-        days *
-        assignment.labourCount *
-        (assignment.companyLabourRate - assignment.originalLabourRate);
+      const days = attendanceSummary
+        ? attendanceSummary.labourDays
+        : getAssignmentDaysInRange(
+            assignment,
+            rangeStart,
+            rangeEnd,
+            today,
+          ) * assignment.labourCount;
+      const profit = attendanceSummary
+        ? attendanceSummary.profit
+        : days *
+          (assignment.companyLabourRate - assignment.originalLabourRate);
       const key = String(assignment.company);
       const summary = summaries.get(key);
       summary.profit += profit;
       summary.supplyCount += 1;
-      summary.labourDays += days * assignment.labourCount;
+      summary.labourDays += days;
       const currentLastSupply = lastSupplies.get(key);
       if (
         !currentLastSupply ||
         assignment.startDate > currentLastSupply.startDate
       ) {
         lastSupplies.set(key, {
-          labourCount: assignment.labourCount,
+          labourCount: assignment.workerIds?.length || assignment.labourCount,
           zone: assignment.zone,
           startDate: assignment.startDate,
           endDate: assignment.endDate,
@@ -910,6 +1058,108 @@ router.patch(
 );
 
 router.get(
+  "/:id/labour-options",
+  allowRoles("OWNER", "ADMIN"),
+  asyncHandler(async (req, res) => {
+    const company = await CompanyClient.findById(req.params.id);
+    if (!company) throw new ApiError(404, "Company/client not found.");
+    const zone = String(req.query.zone || "").trim();
+    if (!zone) throw new ApiError(400, "Select a company location.");
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const pageSize = Number.parseInt(req.query.pageSize, 10) || 5;
+    if (![5, 10].includes(pageSize)) {
+      throw new ApiError(400, "Labour page size must be 5 or 10.");
+    }
+    const rateDate = req.query.date
+      ? parseDateOnly(String(req.query.date), "Rate date")
+      : new Date();
+    const rateThroughDate = new Date(
+      Date.UTC(
+        rateDate.getUTCFullYear(),
+        rateDate.getUTCMonth(),
+        rateDate.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+    const search = String(req.query.search || "").trim().slice(0, 100);
+    const workerFilter = {
+      companyName: company.name,
+      workZone: zone,
+      type: "LABOUR",
+      active: { $ne: false },
+      deletedAt: null,
+      ...(search ? { name: new RegExp(escapeRegex(search), "i") } : {}),
+    };
+    const [total, workers] = await Promise.all([
+      Worker.countDocuments(workerFilter).collation({
+        locale: "en",
+        strength: 2,
+      }),
+      Worker.find(workerFilter)
+        .select("_id name workZone defaultDailyRate overtimeHourlyRate rateHistory rateHistoryFallbackToZone")
+        .sort({ name: 1 })
+        .collation({ locale: "en", strength: 2 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .lean(),
+    ]);
+    const [workerRates, zoneRates] = workers.length
+      ? await Promise.all([
+          CompanyWorkerRate.find({
+            company: company._id,
+            worker: { $in: workers.map((worker) => worker._id) },
+            applicableFrom: { $lte: rateThroughDate },
+          })
+            .sort({ worker: 1, applicableFrom: 1 })
+            .lean(),
+          CompanyZoneRate.find({
+            company: company._id,
+            applicableFrom: { $lte: rateThroughDate },
+          })
+            .sort({ applicableFrom: 1 })
+            .lean(),
+        ])
+      : [[], []];
+    const workerRatesById = new Map();
+    for (const rate of workerRates) {
+      const key = String(rate.worker);
+      if (!workerRatesById.has(key)) workerRatesById.set(key, []);
+      workerRatesById.get(key).push(rate);
+    }
+    const zoneRateHistory = zoneRates.filter(
+      (rate) => normalizeZoneKey(rate.zone) === normalizeZoneKey(zone),
+    );
+    const effectiveZoneRate = getEffectiveZoneRateRecord(
+      zoneRateHistory,
+      rateDate,
+    );
+    res.json({
+      workers: workers.map((worker) => ({
+        _id: worker._id,
+        name: worker.name,
+        workZone: worker.workZone,
+        dailyRate: getEffectiveWorkerRate(
+          workerRatesById.get(String(worker._id)) || [],
+          rateDate,
+          company,
+          worker,
+          effectiveZoneRate,
+        ).labourDailyRate,
+      })),
+      pagination: {
+        page,
+        pageSize,
+        total,
+        pages: Math.max(1, Math.ceil(total / pageSize)),
+      },
+    });
+  }),
+);
+
+router.get(
   "/:id/assignments",
   asyncHandler(async (req, res) => {
     const company = await CompanyClient.findById(req.params.id);
@@ -930,28 +1180,56 @@ router.get(
         ? { $or: [{ endDate: { $gte: rangeStart } }, { endDate: null }] }
         : { endDate: { $gte: rangeStart } }),
     }).sort({ startDate: -1, createdAt: -1 });
+    const { workers, attendance } = await getAssignmentAttendance(
+      company,
+      assignments,
+      rangeStart,
+      rangeEnd,
+    );
+    const workersById = new Map(
+      workers.map((worker) => [String(worker._id), worker]),
+    );
     let labourDays = 0;
     let profit = 0;
     const records = assignments.map((assignment) => {
-      const days = getAssignmentDaysInRange(
+      const attendanceSummary = summarizeAssignmentAttendance(
         assignment,
+        attendance,
         rangeStart,
         rangeEnd,
         today,
       );
-      const assignedLabourDays = days * assignment.labourCount;
+      const days = attendanceSummary
+        ? attendanceSummary.labourDays
+        : getAssignmentDaysInRange(
+            assignment,
+            rangeStart,
+            rangeEnd,
+            today,
+          );
+      const assignedLabourDays = attendanceSummary
+        ? days
+        : days * assignment.labourCount;
       labourDays += assignedLabourDays;
-      const assignmentProfit =
-        assignedLabourDays *
-        (assignment.companyLabourRate - assignment.originalLabourRate);
+      const assignmentProfit = attendanceSummary
+        ? attendanceSummary.profit
+        : assignedLabourDays *
+          (assignment.companyLabourRate - assignment.originalLabourRate);
       if (req.user.role === "OWNER") profit += assignmentProfit;
       const data = assignment.toObject();
+      data.workers = (assignment.workerIds || [])
+        .map((workerId) => workersById.get(String(workerId)))
+        .filter(Boolean)
+        .map(({ _id, name, workZone }) => ({ _id, name, workZone }));
+      data.labourCount = assignment.workerIds?.length || assignment.labourCount;
       data.periodDays = days;
       data.labourDays = assignedLabourDays;
+      data.attendanceBased = Boolean(attendanceSummary);
       if (req.user.role === "OWNER") {
         data.profit = assignmentProfit;
       } else {
         delete data.companyLabourRate;
+        delete data.companyOvertimeRate;
         delete data.originalLabourRate;
       }
       return data;
@@ -972,12 +1250,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const company = await CompanyClient.findById(req.params.id);
     if (!company) throw new ApiError(404, "Company/client not found.");
-    const labourCount = Number(req.body.labourCount);
-    if (!Number.isInteger(labourCount) || labourCount < 1) {
-      throw new ApiError(400, "Labour count must be a positive whole number.");
-    }
     const zone = String(req.body.zone || "").trim();
     if (!zone) throw new ApiError(400, "Zone is required.");
+    const workerIds =
+      req.body.workerIds === undefined
+        ? null
+        : await validateAssignedWorkers(company, zone, req.body.workerIds);
+    const labourCount = workerIds
+      ? workerIds.length
+      : Number(req.body.labourCount);
+    if (!Number.isInteger(labourCount) || labourCount < 1) {
+      throw new ApiError(400, "Select at least one labour for this location.");
+    }
     const startDate = parseDateOnly(req.body.startDate, "From date");
     const endDate =
       req.body.ongoing || !req.body.endDate
@@ -986,12 +1270,19 @@ router.post(
     if (endDate && startDate > endDate) {
       throw new ApiError(400, "From date must be on or before To date.");
     }
+    await ensureWorkersAreNotDoubleAssigned(
+      company,
+      workerIds,
+      startDate,
+      endDate,
+    );
     const rates = await getAssignmentRates(company, zone, startDate);
     const assignment = await CompanyLabourAssignment.create({
       company: company._id,
       companyName: company.name,
       zone,
       labourCount,
+      ...(workerIds ? { workerIds } : {}),
       startDate,
       endDate,
       ...rates,
@@ -1004,8 +1295,14 @@ router.post(
       { companyId: company.id, assignmentId: assignment.id, section: "companies" },
     );
     const assignmentData = assignment.toObject();
+    assignmentData.workers = workerIds
+      ? await Worker.find({ _id: { $in: workerIds } })
+          .select("_id name workZone")
+          .lean()
+      : [];
     if (req.user.role !== "OWNER") {
       delete assignmentData.companyLabourRate;
+      delete assignmentData.companyOvertimeRate;
       delete assignmentData.originalLabourRate;
     }
     res.status(201).json({ assignment: assignmentData });
@@ -1031,6 +1328,9 @@ router.patch(
     if (!assignment) throw new ApiError(404, "Labour record not found.");
     const previousZone = assignment.zone;
     const previousStartDate = assignment.startDate.getTime();
+    if (req.body.zone !== undefined && String(req.body.zone).trim()) {
+      assignment.zone = String(req.body.zone).trim();
+    }
     if (req.body.labourCount !== undefined) {
       const labourCount = Number(req.body.labourCount);
       if (!Number.isInteger(labourCount) || labourCount < 1) {
@@ -1038,11 +1338,16 @@ router.patch(
       }
       assignment.labourCount = labourCount;
     }
+    if (req.body.workerIds !== undefined) {
+      assignment.workerIds = await validateAssignedWorkers(
+        company,
+        assignment.zone,
+        req.body.workerIds,
+      );
+      assignment.labourCount = assignment.workerIds.length;
+    }
     if (req.body.startDate !== undefined) {
       assignment.startDate = parseDateOnly(req.body.startDate, "From date");
-    }
-    if (req.body.zone !== undefined && String(req.body.zone).trim()) {
-      assignment.zone = String(req.body.zone).trim();
     }
     if (req.body.ongoing === true) {
       assignment.endDate = null;
@@ -1054,6 +1359,13 @@ router.patch(
     if (assignment.endDate && assignment.startDate > assignment.endDate) {
       throw new ApiError(400, "From date must be on or before To date.");
     }
+    await ensureWorkersAreNotDoubleAssigned(
+      company,
+      assignment.workerIds,
+      assignment.startDate,
+      assignment.endDate,
+      assignment._id,
+    );
     if (
       assignment.zone !== previousZone ||
       assignment.startDate.getTime() !== previousStartDate
@@ -1070,8 +1382,12 @@ router.patch(
       { companyId: company.id, assignmentId: assignment.id, section: "companies" },
     );
     const data = assignment.toObject();
+    data.workers = await Worker.find({ _id: { $in: assignment.workerIds || [] } })
+      .select("_id name workZone")
+      .lean();
     if (req.user.role !== "OWNER") {
       delete data.companyLabourRate;
+      delete data.companyOvertimeRate;
       delete data.originalLabourRate;
     }
     res.json({ assignment: data });

@@ -39,6 +39,7 @@ import {
   subscribeToPaymentChanges,
 } from "../utils/paymentEvents.js";
 import { fetchAllPages } from "../utils/fetchAllPages.js";
+import { createSalaryBreakdown } from "../utils/salaryBreakdown.js";
 
 const loadAllPayments = (params = {}, endpoint = "/payments") =>
   fetchAllPages(async (skip, limit) => {
@@ -311,6 +312,11 @@ const relativeDate = (value) => {
   return `${days} days ago`;
 };
 
+const currentCalendarMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
 export function PaymentKhataPage() {
   const navigate = useNavigate();
   const recycleBinRef = useRef(null);
@@ -359,9 +365,14 @@ export function PaymentKhataPage() {
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [error, setError] = useState("");
   const [loadingWorkers, setLoadingWorkers] = useState(true);
-  const [selectedWorkerDetail, setSelectedWorkerDetail] = useState(null);
+  const [salarySummary, setSalarySummary] = useState(null);
+  const [salarySummaryLoading, setSalarySummaryLoading] = useState(false);
+  const [salarySummaryError, setSalarySummaryError] = useState("");
+  const [salaryCalculationOpen, setSalaryCalculationOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const salaryMonth = useMemo(currentCalendarMonth, []);
   const paymentsRequestId = useRef(0);
+  const salarySummaryRequestId = useRef(0);
   const refreshInProgress = useRef(false);
 
   const loadWorkers = useCallback(async (dateRange = { from: "", to: "" }) => {
@@ -429,25 +440,45 @@ export function PaymentKhataPage() {
   useEffect(() => {
     loadWorkers();
   }, [loadWorkers]);
-  useEffect(() => {
+  const loadSalarySummary = useCallback(async () => {
+    const requestId = ++salarySummaryRequestId.current;
     if (!selectedWorkerId) {
-      setSelectedWorkerDetail(null);
+      setSalarySummary(null);
+      setSalarySummaryLoading(false);
+      setSalarySummaryError("");
       return;
     }
-    let active = true;
-
-    request(api.get(`/workers/${selectedWorkerId}`))
-      .then((result) => {
-        if (active) setSelectedWorkerDetail(result);
-      })
-      .catch(() => {
-        if (active) setSelectedWorkerDetail(null);
-      });
-
+    setSalarySummary(null);
+    setSalarySummaryLoading(true);
+    setSalarySummaryError("");
+    try {
+      const result = await request(
+        api.get(`/workers/${selectedWorkerId}/salary-summary`, {
+          params: { month: salaryMonth },
+        }),
+      );
+      if (requestId === salarySummaryRequestId.current) {
+        setSalarySummary(result);
+      }
+    } catch (err) {
+      if (requestId === salarySummaryRequestId.current) {
+        setSalarySummary(null);
+        const message = errorMessage(err);
+        setSalarySummaryError(message);
+        setError(message);
+      }
+    } finally {
+      if (requestId === salarySummaryRequestId.current) {
+        setSalarySummaryLoading(false);
+      }
+    }
+  }, [selectedWorkerId, salaryMonth]);
+  useEffect(() => {
+    loadSalarySummary();
     return () => {
-      active = false;
+      salarySummaryRequestId.current += 1;
     };
-  }, [selectedWorkerId]);
+  }, [loadSalarySummary]);
   useEffect(() => {
     loadPayments();
   }, [loadPayments]);
@@ -457,7 +488,11 @@ export function PaymentKhataPage() {
     setRefreshing(true);
     setError("");
     try {
-      await Promise.all([loadWorkers(appliedAccountRange), loadPayments()]);
+      await Promise.all([
+        loadWorkers(appliedAccountRange),
+        loadPayments(),
+        loadSalarySummary(),
+      ]);
       if (showRecycleBin) await loadDeletedPayments();
       if (reportOpen) await loadMasterReport();
     } finally {
@@ -467,6 +502,7 @@ export function PaymentKhataPage() {
   }, [
     loadWorkers,
     loadPayments,
+    loadSalarySummary,
     appliedAccountRange,
     showRecycleBin,
     loadDeletedPayments,
@@ -607,40 +643,9 @@ export function PaymentKhataPage() {
     Number(selectedWorker?.totalDue || 0) -
     Number(selectedWorker?.overpaid || 0);
   const salaryBreakdown = useMemo(() => {
-    const worker = selectedWorker || selectedWorkerDetail?.worker;
-    if (!worker) return null;
-
-    const dayRate = Number(worker.defaultDailyRate || 0);
-    const otRate = Number(worker.overtimeHourlyRate || 0);
-    const payable = Number(
-      worker.totalPayable || selectedWorkerDetail?.attendanceSummary?.totalPayable || 0,
-    );
-    const presentDaysFromSummary = Number(
-      selectedWorkerDetail?.attendanceSummary?.presentDays || 0,
-    );
-    const presentDays =
-      presentDaysFromSummary ||
-      (dayRate > 0 ? Math.max(0, Math.floor(payable / dayRate)) : 0);
-    const dayComponent = Math.min(payable, presentDays * dayRate);
-    const otComponent = Math.max(0, payable - dayComponent);
-    const computedOtHours = otRate > 0 ? Math.round(otComponent / otRate) : 0;
-    const total = Math.max(0, dayComponent + otComponent);
-
-    if (!payable && !dayRate && !otRate) return null;
-
-    return {
-      presentDays: presentDays || 0,
-      dayRate,
-      otRate,
-      otHours: computedOtHours,
-      payable,
-      dayComponent,
-      otComponent,
-      total,
-      formula: `${presentDays || 0} days × ${money(dayRate)} + (${computedOtHours} OT hrs × ${money(otRate)})`,
-      calculation: `${money(dayComponent)} + ${money(otComponent)} = ${money(total)}`,
-    };
-  }, [selectedWorker, selectedWorkerDetail]);
+    if (salarySummary?.month !== salaryMonth) return null;
+    return createSalaryBreakdown(salarySummary);
+  }, [salaryMonth, salarySummary]);
   const entries = useMemo(
     () => paymentBalances(payments, selectedWorkerBalance),
     [payments, selectedWorkerBalance],
@@ -699,7 +704,7 @@ export function PaymentKhataPage() {
   const completePaymentSave = async () => {
     setAddingFlow("");
     setEditing(null);
-    await Promise.all([loadWorkers(), loadPayments()]);
+    await Promise.all([loadWorkers(), loadPayments(), loadSalarySummary()]);
   };
   const sendReminder = () => {
     if (!selectedWorker?.phone) {
@@ -1343,26 +1348,72 @@ export function PaymentKhataPage() {
                 </Field>
               </div>
               <ErrorNote error={error} />
-              {salaryBreakdown && Number(salaryBreakdown.total) > 0 && (
-                <div className={styles["khata-salary-summary"]}>
-                  <div className={styles["khata-salary-copy"]}>
-                    <span className={styles["khata-salary-label"]}>
-                      SAMPLE CALCULATION
-                    </span>
-                    <strong className={styles["khata-salary-total"]}>
-                      Salary — {money(salaryBreakdown.total)}
-                    </strong>
-                    <small className={styles["khata-salary-formula"]}>
-                      {salaryBreakdown.formula}
-                    </small>
-                    <em className={styles["khata-salary-calculation"]}>
-                      {salaryBreakdown.calculation}
-                    </em>
+              {selectedWorker && (
+                <>
+                  <div className={styles["khata-salary-toggle"]}>
+                    <Button
+                      type="button"
+                      className={styles["button-secondary"]}
+                      aria-expanded={salaryCalculationOpen}
+                      onClick={() =>
+                        setSalaryCalculationOpen((open) => !open)
+                      }
+                    >
+                      {salaryCalculationOpen
+                        ? "Hide calculation"
+                        : "Show calculation"}
+                    </Button>
                   </div>
-                  <span className={styles["khata-salary-note"]}>
-                    Days aur rates sirf example hai; actual attendance aur rates se calculate karen.
-                  </span>
-                </div>
+                  {salaryCalculationOpen && (
+                    <div className={styles["khata-salary-summary"]}>
+                      {salarySummaryLoading ? (
+                        <p>Loading attendance calculation…</p>
+                      ) : salarySummaryError ? (
+                        <p>{salarySummaryError}</p>
+                      ) : salaryBreakdown ? (
+                        <div className={styles["khata-salary-copy"]}>
+                          <span className={styles["khata-salary-label"]}>
+                            {salaryBreakdown.monthLabel
+                              ? `${salaryBreakdown.monthLabel} SALARY CALCULATION`
+                              : "SALARY CALCULATION"}
+                          </span>
+                          <strong className={styles["khata-salary-total"]}>
+                            Current month salary — {money(salaryBreakdown.total)}
+                          </strong>
+                          <small className={styles["khata-salary-formula"]}>
+                            {salaryBreakdown.formula}
+                          </small>
+                          <em className={styles["khata-salary-calculation"]}>
+                            {salaryBreakdown.calculation}
+                          </em>
+                          <small className={styles["khata-salary-formula"]}>
+                            Previous balance carried forward:{" "}
+                            {money(salaryBreakdown.previousDue)}
+                          </small>
+                          <small className={styles["khata-salary-formula"]}>
+                            Paid this month:{" "}
+                            {money(salaryBreakdown.paidThisMonth)}
+                          </small>
+                          <strong
+                            className={`${styles["khata-salary-total"]} ${
+                              salaryBreakdown.amountDue < 0
+                                ? styles["khata-salary-credit"]
+                                : ""
+                            }`}
+                          >
+                            {salaryBreakdown.amountDue < 0
+                              ? `Extra paid / credit — ${money(Math.abs(salaryBreakdown.amountDue))}`
+                              : `Due including previous balance — ${money(salaryBreakdown.amountDue)}`}
+                          </strong>
+                        </div>
+                      ) : (
+                        <p>
+                          No current-month salary or carried balance to show.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
               <div className={styles["table-wrap"]}>
                 <table className={styles["khata-entry-table"]}>
