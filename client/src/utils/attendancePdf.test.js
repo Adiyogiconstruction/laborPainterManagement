@@ -178,6 +178,12 @@ test("PDF template renders validated attendance data with the fixed landscape la
           index + 4,
         ),
       ),
+      makeWorker(
+        "Long company name worker",
+        "Northstar Infrastructure and Industrial Construction Services Private Limited",
+        "Central Zone",
+        60,
+      ),
     ];
     const doc = await createAttendancePdf({
       month: "2026-08",
@@ -210,6 +216,12 @@ test("PDF template renders validated attendance data with the fixed landscape la
     assert.equal(firstRow.cells["1"].styles.halign, "center");
     assert.equal(firstRow.cells["2"].styles.halign, "center");
     assert.equal(firstRow.cells["3"].styles.halign, "center");
+    const longCompanyRow = doc.lastAutoTable.body.find((row) =>
+      row.cells["2"].text.join(" ").startsWith("Northstar"),
+    );
+    assert.ok(longCompanyRow);
+    assert.ok(longCompanyRow.cells["2"].text.length > 1);
+    assert.ok(longCompanyRow.height > firstRow.height);
     assert.equal(doc.lastAutoTable.body[1].cells["1"].text[0], "Alpha worker");
     assert.equal(doc.lastAutoTable.body[2].cells["3"].text[0], "Mumbai");
     assert.equal(doc.lastAutoTable.body[3].cells["2"].text[0], "Construction Company");
@@ -227,7 +239,12 @@ test("PDF template renders validated attendance data with the fixed landscape la
     assert.deepEqual(firstRow.cells["4"].styles.fillColor, [255, 194, 194]);
     assert.deepEqual(firstRow.cells["35"].styles.fillColor, [222, 240, 222]);
     assert.equal(
-      new Set(doc.lastAutoTable.body.slice(0, 60).map((row) => row.height)).size,
+      new Set(
+        doc.lastAutoTable.body
+          .slice(0, 61)
+          .filter((row) => row !== longCompanyRow)
+          .map((row) => row.height),
+      ).size,
       1,
     );
   } finally {

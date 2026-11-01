@@ -304,6 +304,7 @@ export async function createAttendancePdf({
         {
           cellWidth,
           halign: "center",
+          ...(index === 2 ? { overflow: "linebreak" } : {}),
         },
       ]),
     ),
