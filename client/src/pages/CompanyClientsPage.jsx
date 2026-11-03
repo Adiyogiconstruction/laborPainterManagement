@@ -294,9 +294,19 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   }, [includeInactive]);
 
   useEffect(() => {
-    if (!isOwner || !selectedCompanyId || !detailRange.from || !detailRange.to) {
+    if (!isOwner || !selectedCompanyId) {
       setCompanyOverview(null);
       setDetailLoading(false);
+      return undefined;
+    }
+    if (!detailRange.from || !detailRange.to || detailRange.from > detailRange.to) {
+      setCompanyOverview(null);
+      setDetailLoading(false);
+      setDetailError(
+        !detailRange.from || !detailRange.to
+          ? "Select both dates to view the report."
+          : "The start date must be on or before the end date.",
+      );
       return undefined;
     }
     let current = true;
@@ -1448,7 +1458,15 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               </div>
             </>
           ) : detailError ? (
-            <Empty title="Unable to load the labour profitability report" />
+            <Empty
+              title={
+                !detailRange.from ||
+                !detailRange.to ||
+                detailRange.from > detailRange.to
+                  ? "Select a valid date range to view the report"
+                  : "Unable to load the labour profitability report"
+              }
+            />
           ) : (
             <Empty title="Select a company to view its labour details" />
           )}
