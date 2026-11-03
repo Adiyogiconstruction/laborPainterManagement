@@ -841,6 +841,31 @@ router.get(
       stats.dutyProfit += companyDutyBilling - labourDutySalary;
       stats.overtimeProfit += companyOvertimeBilling - labourOvertimeSalary;
     }
+    for (const worker of visibleWorkers) {
+      const stats = statsByWorker.get(String(worker._id));
+      if (stats.attendanceEntries > 0) continue;
+      const zoneRate = getEffectiveZoneRateRecord(
+        zoneRatesByName.get(normalizeZoneKey(worker.workZone)) || [],
+        ratesThroughDate,
+      );
+      const rates = getEffectiveWorkerRate(
+        ratesByWorker.get(String(worker._id)) || [],
+        ratesThroughDate,
+        company,
+        worker,
+        zoneRate,
+      );
+      const configuredRates = {
+        companyDailyRates: zoneRate?.dailyRate ?? rates.companyDailyRate,
+        companyOvertimeRates:
+          zoneRate?.overtimeHourlyRate ?? rates.companyOvertimeRate,
+        labourDailyRates: rates.labourDailyRate,
+        labourOvertimeRates: rates.labourOvertimeRate,
+      };
+      for (const [key, value] of Object.entries(configuredRates)) {
+        if (Number.isFinite(value) && value > 0) stats[key].add(value);
+      }
+    }
     const totals = [...statsByWorker.values()].reduce(
       (result, stats) => ({
         attendanceEntries: result.attendanceEntries + stats.attendanceEntries,

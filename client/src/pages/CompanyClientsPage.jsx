@@ -193,13 +193,9 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   const [companies, setCompanies] = useState([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [detailRange, setDetailRange] = useState(currentMonthRange);
-  const [appliedDetailRange, setAppliedDetailRange] = useState(currentMonthRange);
   const [detailZone, setDetailZone] = useState("");
-  const [appliedDetailZone, setAppliedDetailZone] = useState("");
   const [detailTeam, setDetailTeam] = useState("");
-  const [appliedDetailTeam, setAppliedDetailTeam] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState(null);
-  const [appliedSelectedWorkers, setAppliedSelectedWorkers] = useState(null);
   const [labourSearch, setLabourSearch] = useState("");
   const [labourMenuOpen, setLabourMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -298,7 +294,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   }, [includeInactive]);
 
   useEffect(() => {
-    if (!isOwner || !selectedCompanyId || !appliedDetailRange.from || !appliedDetailRange.to) {
+    if (!isOwner || !selectedCompanyId || !detailRange.from || !detailRange.to) {
       setCompanyOverview(null);
       setDetailLoading(false);
       return undefined;
@@ -309,11 +305,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     request(
       api.get(`/companies/${selectedCompanyId}/overview`, {
         params: {
-          from: appliedDetailRange.from,
-          to: appliedDetailRange.to,
-          zone: appliedDetailZone,
-          team: appliedDetailTeam,
-          workerIds: workerIdsFilter(appliedSelectedWorkers),
+          from: detailRange.from,
+          to: detailRange.to,
+          zone: detailZone,
+          team: detailTeam,
+          workerIds: workerIdsFilter(selectedWorkers),
           page: detailPage,
           pageSize: detailPageSize,
         },
@@ -334,11 +330,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
   }, [
     isOwner,
     selectedCompanyId,
-    appliedDetailRange.from,
-    appliedDetailRange.to,
-    appliedDetailZone,
-    appliedDetailTeam,
-    appliedSelectedWorkers,
+    detailRange.from,
+    detailRange.to,
+    detailZone,
+    detailTeam,
+    selectedWorkers,
     detailPage,
     detailPageSize,
     detailRefresh,
@@ -384,30 +380,12 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     profitRefresh,
   ]);
 
-  const applyReportFilters = () => {
-    if (!detailRange.from || !detailRange.to || detailRange.from > detailRange.to) {
-      setDetailError("Choose a valid report date range.");
-      return;
-    }
-    setDetailError("");
-    setAppliedDetailRange({ ...detailRange });
-    setAppliedDetailZone(detailZone);
-    setAppliedDetailTeam(detailTeam);
-    setAppliedSelectedWorkers(selectedWorkers === null ? null : [...selectedWorkers]);
-    setDetailPage(1);
-    setLabourMenuOpen(false);
-  };
-
   const resetReportFilters = () => {
     const range = currentMonthRange();
     setDetailRange(range);
-    setAppliedDetailRange(range);
     setDetailZone("");
-    setAppliedDetailZone("");
     setDetailTeam("");
-    setAppliedDetailTeam("");
     setSelectedWorkers(null);
-    setAppliedSelectedWorkers(null);
     setLabourSearch("");
     setDetailPage(1);
     setDetailError("");
@@ -419,11 +397,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
     setDetailError("");
     try {
       const params = {
-        from: appliedDetailRange.from,
-        to: appliedDetailRange.to,
-        zone: appliedDetailZone,
-        team: appliedDetailTeam,
-        workerIds: workerIdsFilter(appliedSelectedWorkers),
+        from: detailRange.from,
+        to: detailRange.to,
+        zone: detailZone,
+        team: detailTeam,
+        workerIds: workerIdsFilter(selectedWorkers),
         page: 1,
         pageSize: 50,
       };
@@ -455,13 +433,13 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       downloadCompanyProfitPdf({
         company: companyOverview.company,
         filters: {
-          ...appliedDetailRange,
-          zone: appliedDetailZone || "All zones",
-          team: appliedDetailTeam || "All teams",
+          ...detailRange,
+          zone: detailZone || "All zones",
+          team: detailTeam || "All teams",
           labours:
-            appliedSelectedWorkers === null
+            selectedWorkers === null
               ? "All labour"
-              : `${appliedSelectedWorkers.length} selected`,
+              : `${selectedWorkers.length} selected`,
         },
         rows,
         totals: companyOverview.totals,
@@ -497,9 +475,9 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
             : row[key] ?? "",
         [
           ["Company", companyOverview.company.name],
-          ["Date range", `${appliedDetailRange.from} to ${appliedDetailRange.to}`],
-          ["Zone", appliedDetailZone || "All zones"],
-          ["Team", appliedDetailTeam || "All teams"],
+          ["Date range", `${detailRange.from} to ${detailRange.to}`],
+          ["Zone", detailZone || "All zones"],
+          ["Team", detailTeam || "All teams"],
           ["Company billing", companyOverview.totals.companyBilling],
           ["Labour salary", companyOverview.totals.labourSalary],
           ["Duty profit", companyOverview.totals.dutyProfit],
@@ -514,7 +492,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       );
       const link = document.createElement("a");
       link.href = url;
-      link.download = `labour-profit-${appliedDetailRange.from}-to-${appliedDetailRange.to}.xlsx`;
+      link.download = `labour-profit-${detailRange.from}-to-${detailRange.to}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -765,11 +743,11 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
       const result = await request(
         api.get(`/companies/${selectedCompanyId}/overview`, {
           params: {
-            from: appliedDetailRange.from,
-            to: appliedDetailRange.to,
-            zone: appliedDetailZone,
-            team: appliedDetailTeam,
-            workerIds: workerIdsFilter(appliedSelectedWorkers),
+            from: detailRange.from,
+            to: detailRange.to,
+            zone: detailZone,
+            team: detailTeam,
+            workerIds: workerIdsFilter(selectedWorkers),
             page: detailPage,
             pageSize: detailPageSize,
           },
@@ -1167,11 +1145,8 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                   setSelectedCompanyId(event.target.value);
                   setDetailPage(1);
                   setSelectedWorkers(null);
-                  setAppliedSelectedWorkers(null);
                   setDetailZone("");
-                  setAppliedDetailZone("");
                   setDetailTeam("");
-                  setAppliedDetailTeam("");
                   setZoneRateForm((current) => ({ ...current, zone: "" }));
                 }}
               >
@@ -1291,13 +1266,6 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
             <div className={styles["company-report-filter-actions"]}>
               <Button
                 type="button"
-                className={styles["button-primary"]}
-                onClick={applyReportFilters}
-              >
-                Apply filters
-              </Button>
-              <Button
-                type="button"
                 className={styles["button-secondary"]}
                 onClick={resetReportFilters}
               >
@@ -1347,7 +1315,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               <div className={styles["company-detail-breakdown"]}>
                 <h3>Labour profitability by attendance</h3>
                 <p>
-                  {rangeLabel(appliedDetailRange)} · {appliedDetailZone || "All zones"} · {appliedDetailTeam || "All teams"} · Daily and overtime values use saved effective-date rate snapshots. Expenses are excluded.
+                  {rangeLabel(detailRange)} · {detailZone || "All zones"} · {detailTeam || "All teams"} · Daily and overtime values use saved effective-date rate snapshots. Expenses are excluded.
                 </p>
                 <div className={styles["table-wrap"]}>
                   <table className={styles["company-detail-table"]}>
