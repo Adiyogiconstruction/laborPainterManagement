@@ -11,6 +11,7 @@ import { ApiError, asyncHandler } from "../utils/asyncHandler.js";
 import { pick } from "../utils/serializers.js";
 import { recordAdminActivity } from "../utils/adminActivity.js";
 import {
+  calculateAttendanceProfit,
   getAssignmentDaysInRange,
   summarizeAssignmentAttendance,
 } from "../utils/companyAssignmentUtils.js";
@@ -288,18 +289,19 @@ const ensureWorkersAreNotDoubleAssigned = async (
   if (!workerIds?.length) return;
   const query = {
     company: company._id,
+    deletedAt: null,
     workerIds: { $in: workerIds },
     startDate: { $lte: endDate || new Date("9999-12-31T23:59:59.999Z") },
     $or: [{ endDate: null }, { endDate: { $gte: startDate } }],
   };
   if (excludeAssignmentId) query._id = { $ne: excludeAssignmentId };
   const overlapping = await CompanyLabourAssignment.findOne(query)
-    .select("_id")
+    .select("_id startDate endDate")
     .lean();
   if (overlapping) {
     throw new ApiError(
       409,
-      "A selected labourer already has a tracking record that overlaps these dates.",
+      `A selected labourer already has a tracking record from ${overlapping.startDate.toISOString().slice(0, 10)} to ${overlapping.endDate ? overlapping.endDate.toISOString().slice(0, 10) : "ongoing"}. Update or delete that record first.`,
     );
   }
 };
@@ -500,6 +502,7 @@ router.get(
       .sort({ name: 1 });
     const assignments = await CompanyLabourAssignment.find({
       company: { $in: companies.map((company) => company._id) },
+      deletedAt: null,
       startDate: { $lte: rangeEnd },
       ...(rangeStart <= today
         ? { $or: [{ endDate: { $gte: rangeStart } }, { endDate: null }] }
@@ -813,11 +816,10 @@ router.get(
       if (workUnits > 0) stats.days += 1;
       stats.overtimeHours += overtimeHours;
       const companyDailyRate = finiteNumber(
-        record.companyDailyRate ?? zoneRate?.dailyRate ?? rates.companyDailyRate,
+        zoneRate?.dailyRate ?? rates.companyDailyRate,
       );
       const companyOvertimeRate = finiteNumber(
-        record.companyOvertimeRate ??
-          zoneRate?.overtimeHourlyRate ??
+        zoneRate?.overtimeHourlyRate ??
           rates.companyOvertimeRate ??
           0,
       );
@@ -825,21 +827,22 @@ router.get(
       const labourOvertimeRate = finiteNumber(
         record.overtimeRate ?? rates.labourOvertimeRate,
       );
-      const companyDutyBilling = companyDailyRate * workUnits;
-      const companyOvertimeBilling = companyOvertimeRate * overtimeHours;
-      const labourDutySalary = labourDailyRate * workUnits;
-      const labourOvertimeSalary = labourOvertimeRate * overtimeHours;
+      const attendanceProfit = calculateAttendanceProfit({
+        companyDailyRate,
+        companyOvertimeRate,
+        labourDailyRate,
+        labourOvertimeRate,
+        workUnits,
+        overtimeHours,
+      });
       stats.companyDailyRates.add(companyDailyRate);
       stats.companyOvertimeRates.add(companyOvertimeRate);
       stats.labourDailyRates.add(labourDailyRate);
       stats.labourOvertimeRates.add(labourOvertimeRate);
-      stats.companyBilling += companyDutyBilling + companyOvertimeBilling;
-      stats.labourSalary += finiteNumber(
-        record.payableAmount,
-        labourDutySalary + labourOvertimeSalary,
-      );
-      stats.dutyProfit += companyDutyBilling - labourDutySalary;
-      stats.overtimeProfit += companyOvertimeBilling - labourOvertimeSalary;
+      stats.companyBilling += attendanceProfit.companyBilling;
+      stats.labourSalary += attendanceProfit.labourSalary;
+      stats.dutyProfit += attendanceProfit.dutyProfit;
+      stats.overtimeProfit += attendanceProfit.overtimeProfit;
     }
     for (const worker of visibleWorkers) {
       const stats = statsByWorker.get(String(worker._id));
@@ -1038,6 +1041,19 @@ router.patch(
       }
       rates.companyDailyRate = value;
     }
+    await CompanyWorkerRate.updateMany(
+      {
+        company: company._id,
+        worker: worker._id,
+        applicableFrom: { $gt: applicableFrom },
+      },
+      {
+        $set: {
+          labourDailyRate: rates.labourDailyRate,
+          labourOvertimeRate: rates.labourOvertimeRate,
+        },
+      },
+    );
     const rate = await CompanyWorkerRate.findOneAndUpdate(
       { company: company._id, worker: worker._id, applicableFrom },
       {
@@ -1200,6 +1216,7 @@ router.get(
     );
     const assignments = await CompanyLabourAssignment.find({
       company: company._id,
+      deletedAt: null,
       startDate: { $lte: rangeEnd },
       ...(rangeStart <= today
         ? { $or: [{ endDate: { $gte: rangeStart } }, { endDate: null }] }
@@ -1349,6 +1366,7 @@ router.patch(
     const assignment = await CompanyLabourAssignment.findOne({
       _id: req.params.assignmentId,
       company: company._id,
+      deletedAt: null,
     });
     if (!assignment) throw new ApiError(404, "Labour record not found.");
     const previousZone = assignment.zone;

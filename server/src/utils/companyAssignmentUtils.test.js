@@ -1,11 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateAttendanceProfit,
   getAssignmentDaysInRange,
   summarizeAssignmentAttendance,
 } from "./companyAssignmentUtils.js";
 
 const day = (value) => new Date(`${value}T00:00:00.000Z`);
+
+test("labour profit is the rate difference multiplied by attended work units", () => {
+  assert.deepEqual(
+    calculateAttendanceProfit({
+      companyDailyRate: 1000,
+      labourDailyRate: 600,
+      workUnits: 1,
+    }),
+    {
+      companyBilling: 1000,
+      labourSalary: 600,
+      dutyProfit: 400,
+      overtimeProfit: 0,
+    },
+  );
+  assert.equal(
+    calculateAttendanceProfit({
+      companyDailyRate: 1000,
+      labourDailyRate: 600,
+      workUnits: 3,
+    }).dutyProfit,
+    1200,
+  );
+});
 
 test("ongoing assignments accrue through today, not future dates", () => {
   assert.equal(

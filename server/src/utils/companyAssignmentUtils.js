@@ -1,5 +1,28 @@
 const dayMs = 24 * 60 * 60 * 1000;
 
+export function calculateAttendanceProfit({
+  companyDailyRate,
+  companyOvertimeRate = 0,
+  labourDailyRate,
+  labourOvertimeRate = 0,
+  workUnits,
+  overtimeHours = 0,
+}) {
+  const companyDutyBilling = companyDailyRate * workUnits;
+  const companyOvertimeBilling = companyOvertimeRate * overtimeHours;
+  const labourDutySalary = labourDailyRate * workUnits;
+  const labourOvertimeSalary = labourOvertimeRate * overtimeHours;
+  const companyBilling = companyDutyBilling + companyOvertimeBilling;
+  const labourSalary = labourDutySalary + labourOvertimeSalary;
+
+  return {
+    companyBilling,
+    labourSalary,
+    dutyProfit: companyDutyBilling - labourDutySalary,
+    overtimeProfit: companyOvertimeBilling - labourOvertimeSalary,
+  };
+}
+
 export function getAssignmentDaysInRange(
   assignment,
   rangeStart,

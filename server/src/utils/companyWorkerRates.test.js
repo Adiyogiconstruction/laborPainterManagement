@@ -357,7 +357,7 @@ test("detects rate edits against the rate effective on the selected date", () =>
   );
 });
 
-test("worker rate changes replace same-day values and keep date history sorted", () => {
+test("backdated worker rate changes replace all later effective rates", () => {
   const rateWorker = {
     rateHistory: [
       {
@@ -385,9 +385,23 @@ test("worker rate changes replace same-day values and keep date history sorted",
       rate.dailyRate,
       rate.overtimeRate,
     ]),
-    [
-      ["2026-10-10", 550, 55],
-      ["2026-10-20", 700, 70],
-    ],
+    [["2026-10-10", 550, 55]],
+  );
+  assert.deepEqual(
+    getCompanyWorkerRates(
+      { ...worker, ...rateWorker, defaultDailyRate: 0 },
+      new Date("2026-10-20T00:00:00.000Z"),
+      {
+        companyByName: new Map(),
+        ratesByWorker: new Map(),
+        zoneRatesByCompanyZone: new Map(),
+      },
+    ),
+    {
+      companyDailyRate: 0,
+      companyOvertimeRate: 0,
+      dailyRate: 550,
+      overtimeRate: 55,
+    },
   );
 });

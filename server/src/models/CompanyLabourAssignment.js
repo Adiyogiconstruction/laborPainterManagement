@@ -17,6 +17,7 @@ const companyLabourAssignmentSchema = new mongoose.Schema(
     },
     startDate: { type: Date, required: true },
     endDate: { type: Date, default: null },
+    deletedAt: { type: Date, default: null, index: true },
     companyLabourRate: { type: Number, required: true, min: 0 },
     companyOvertimeRate: { type: Number, min: 0, default: 0 },
     originalLabourRate: { type: Number, required: true, min: 0 },

@@ -1172,22 +1172,44 @@
   background: #dcedfc;
 }
 .company-detail-margin {
-  border-color: #f6dfca !important;
-  background: #fff5eb;
-  color: #d47a24;
+  border-color: #dfe7e5 !important;
+  background: #f3f6f5;
+  color: #52615d;
 }
 .company-detail-margin.company-assignment-loss,
 .company-detail-table .company-assignment-loss {
   color: #bd343d;
 }
+.company-detail-margin.company-assignment-loss {
+  border-color: #f2d4d5 !important;
+  background: #fff1f1;
+}
 .company-detail-margin.company-assignment-loss strong {
   color: #bd343d;
+}
+.company-detail-margin.company-assignment-profit {
+  border-color: #ccecdf !important;
+  background: #effaf5;
+  color: #087653;
+}
+.company-detail-margin.company-assignment-profit strong {
+  color: #087653;
+}
+.company-detail-margin.company-assignment-neutral strong,
+.company-detail-table .company-assignment-neutral {
+  color: #52615d;
 }
 .company-detail-table .company-assignment-profit {
   color: #087653;
 }
 .company-detail-margin > svg {
-  background: #ffead8;
+  background: #e6ecea;
+}
+.company-detail-margin.company-assignment-profit > svg {
+  background: #d9f3e7;
+}
+.company-detail-margin.company-assignment-loss > svg {
+  background: #fbe0e1;
 }
 .company-detail-breakdown {
   padding: 10px;
@@ -1262,9 +1284,18 @@
   font-weight: 700;
 }
 .company-detail-breakdown .table-wrap .company-detail-table .company-detail-total {
-  background: #fff0dc;
-  color: #493c2a;
+  background: #f1f6f5;
+  color: #354641;
   font-weight: 800;
+}
+.company-detail-table .company-detail-total .company-assignment-profit {
+  color: #087653;
+}
+.company-detail-table .company-detail-total .company-assignment-loss {
+  color: #bd343d;
+}
+.company-detail-table .company-detail-total .company-assignment-neutral {
+  color: #52615d;
 }
 .company-worker-rates-row > td {
   padding: 0 8px 5px;

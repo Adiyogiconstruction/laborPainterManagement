@@ -97,6 +97,12 @@ const rateLabel = (values = []) =>
     : "—";
 const workerIdsFilter = (selection) =>
   selection === null ? "" : selection.length ? selection.join(",") : "__none__";
+const profitTone = (value) =>
+  value < 0
+    ? "company-assignment-loss"
+    : value > 0
+      ? "company-assignment-profit"
+      : "company-assignment-neutral";
 
 const blankAssignment = () => {
   const today = localDateInput(new Date());
@@ -123,12 +129,30 @@ function LabourRateEditor({ worker, onSave, saving }) {
     ...worker.rates,
     applicableFrom: localDateInput(new Date()),
   });
+  useEffect(() => {
+    if (!open) {
+      setRates((current) => ({ ...current, ...worker.rates }));
+    }
+  }, [
+    open,
+    worker.rates.labourDailyRate,
+    worker.rates.labourOvertimeRate,
+  ]);
   return (
     <details
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const isOpen = event.currentTarget.open;
+        setOpen(isOpen);
+        if (isOpen) {
+          setRates({
+            ...worker.rates,
+            applicableFrom: localDateInput(new Date()),
+          });
+        }
+      }}
     >
-      <summary>Rates · current values apply to new attendance</summary>
+      <summary>Rates · changes apply to attendance on/after the effective date</summary>
       <form
         className={styles["company-worker-rate-form"]}
         onSubmit={async (event) => {
@@ -1143,7 +1167,7 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
               Labour-wise Profit Sheet
             </span>
           }
-          detail="Profit uses each selected labourer's saved attendance, billing and payable for the selected dates. Absent and unmarked days add no profit; older headcount-only records keep their original calculation until edited with labour selections. Expenses are excluded."
+          detail="For each worked day, profit is the effective company rate minus the labour rate, multiplied by attendance work units. Overtime profit is calculated separately; absent and unmarked days add no profit. Expenses are excluded."
           className={styles["company-detail-panel"]}
         >
           {detailError && <ErrorNote error={detailError} />}
@@ -1306,12 +1330,12 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                   ["Labour rate / day", rateLabel(companyOverview.rateSummary.labourDaily), "salary"],
                   ["Company OT / hour", rateLabel(companyOverview.rateSummary.companyOvertime), "billing"],
                   ["Labour OT / hour", rateLabel(companyOverview.rateSummary.labourOvertime), "salary"],
-                  ["Duty profit", money(companyOverview.totals.dutyProfit), "margin", companyOverview.totals.dutyProfit < 0],
-                  ["OT profit", money(companyOverview.totals.overtimeProfit), "margin", companyOverview.totals.overtimeProfit < 0],
-                  ["Total profit", money(companyOverview.totals.margin), "margin", companyOverview.totals.margin < 0],
-                ].map(([label, value, tone, negative]) => (
+                  ["Duty profit", money(companyOverview.totals.dutyProfit), "margin", companyOverview.totals.dutyProfit],
+                  ["OT profit", money(companyOverview.totals.overtimeProfit), "margin", companyOverview.totals.overtimeProfit],
+                  ["Total profit", money(companyOverview.totals.margin), "margin", companyOverview.totals.margin],
+                ].map(([label, value, tone, profit]) => (
                   <article
-                    className={`${styles[`company-detail-${tone}`]} ${negative ? styles["company-assignment-loss"] : ""}`}
+                    className={`${styles[`company-detail-${tone}`]} ${tone === "margin" ? styles[profitTone(profit)] : ""}`}
                     key={label}
                   >
                     <Building2 size={18} />
@@ -1368,14 +1392,16 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                             <td>{rateLabel(worker.rates.labourDaily)}</td>
                             <td>{rateLabel(worker.rates.companyOvertime)}</td>
                             <td>{rateLabel(worker.rates.labourOvertime)}</td>
-                            <td>{money(worker.dutyProfit)}</td>
-                            <td>{money(worker.overtimeProfit)}</td>
+                            <td className={styles[profitTone(worker.dutyProfit)]}>
+                              {money(worker.dutyProfit)}
+                            </td>
+                            <td className={styles[profitTone(worker.overtimeProfit)]}>
+                              {money(worker.overtimeProfit)}
+                            </td>
                             <td
-                              className={
-                                worker.companyBilling - worker.labourSalary < 0
-                                  ? styles["company-assignment-loss"]
-                                  : styles["company-assignment-profit"]
-                              }
+                              className={styles[
+                                profitTone(worker.companyBilling - worker.labourSalary)
+                              ]}
                             >
                               {money(worker.companyBilling - worker.labourSalary)}
                             </td>
@@ -1405,9 +1431,15 @@ export function CompanyClientsPage({ canEdit = false, isOwner = false }) {
                         <td>{companyOverview.totals.days}</td>
                         <td>{companyOverview.totals.overtimeHours}</td>
                         <td colSpan="4" />
-                        <td>{money(companyOverview.totals.dutyProfit)}</td>
-                        <td>{money(companyOverview.totals.overtimeProfit)}</td>
-                        <td>{money(companyOverview.totals.margin)}</td>
+                        <td className={styles[profitTone(companyOverview.totals.dutyProfit)]}>
+                          {money(companyOverview.totals.dutyProfit)}
+                        </td>
+                        <td className={styles[profitTone(companyOverview.totals.overtimeProfit)]}>
+                          {money(companyOverview.totals.overtimeProfit)}
+                        </td>
+                        <td className={styles[profitTone(companyOverview.totals.margin)]}>
+                          {money(companyOverview.totals.margin)}
+                        </td>
                       </tr>
                     </tbody>
                   </table>

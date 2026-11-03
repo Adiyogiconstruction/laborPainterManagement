@@ -159,6 +159,19 @@ const syncWorkerSalaryRate = async (
       .select("_id companyLabourRate")
       .lean();
     if (company) {
+      await CompanyWorkerRate.updateMany(
+        {
+          company: company._id,
+          worker: worker._id,
+          applicableFrom: { $gt: applicableFrom },
+        },
+        {
+          $set: {
+            labourDailyRate: dailyRate,
+            labourOvertimeRate: overtimeRate,
+          },
+        },
+      );
       const existingRate = await CompanyWorkerRate.findOne({
         company: company._id,
         worker: worker._id,

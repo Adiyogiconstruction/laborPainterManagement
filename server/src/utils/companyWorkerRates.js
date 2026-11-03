@@ -175,21 +175,16 @@ export function upsertWorkerRateHistory(
   const day = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
   );
-  const existing = (worker.rateHistory || []).find(
+  const dayKey = day.toISOString().slice(0, 10);
+  worker.rateHistory = (worker.rateHistory || []).filter(
     (rate) =>
-      new Date(rate.applicableFrom).toISOString().slice(0, 10) ===
-      day.toISOString().slice(0, 10),
+      new Date(rate.applicableFrom).toISOString().slice(0, 10) < dayKey,
   );
-  if (existing) {
-    existing.dailyRate = dailyRate;
-    existing.overtimeRate = overtimeRate;
-  } else {
-    worker.rateHistory.push({
-      applicableFrom: day,
-      dailyRate,
-      overtimeRate,
-    });
-  }
+  worker.rateHistory.push({
+    applicableFrom: day,
+    dailyRate,
+    overtimeRate,
+  });
   worker.rateHistory.sort(
     (left, right) =>
       new Date(left.applicableFrom).getTime() -
